@@ -170,6 +170,24 @@ firing `warning`/`critical` alerts to `http://diagnostic-agent:8000/alert`.
 
 See `docs/deployment/OBSERVABILITY_OPERATIONS_GUIDE.md` §8.6 for the operator view.
 
+## Smoke test (#188)
+
+Repeatable end-to-end verification of the alert → agent → audit (→ Grafana) loop:
+
+```bash
+# Stack must be up (OpenAI key in root .env recommended for DEV):
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  --profile log-collector --profile diagnostic-agent up -d
+
+./scripts/diagnostic-agent-smoke-test.ps1
+./scripts/diagnostic-agent-smoke-test.ps1 -RealPath   # optional fault injection
+```
+
+The script checks `/health`, POSTs a synthetic alert with embedded tenant identifiers,
+verifies the audit JSONL line is redacted, and (when `DIAGNOSTIC_AGENT_GRAFANA_TOKEN`
+is set) confirms a Grafana annotation exists. Use `-SkipGrafana` to skip the optional
+annotation step.
+
 ## Try it without an alert
 
 ```bash
