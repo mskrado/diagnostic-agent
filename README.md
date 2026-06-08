@@ -65,28 +65,70 @@ The most important:
 | `AGENT_GRAFANA_TOKEN` | — | Viewer + `annotations:write`; empty disables Grafana |
 | `AGENT_RAG_ENABLED` | `true` | RAG degrades gracefully if off/empty |
 
-## Run with the observability overlay
+## DEV quickstart (observability overlay)
+
+The agent runs as an opt-in profile on top of the local LGTM stack. From the repo
+root:
+
+### 1. Configure the LLM backend (in the root `.env`)
+
+The compose overlay reads these from the **root** `.env` (copy from `env.example`)
+and maps them into the agent's `AGENT_*` settings:
 
 ```bash
-# OpenAI backend (fast, recommended on Windows/macOS dev):
-DIAGNOSTIC_AGENT_LLM_PROVIDER=openai \
-docker compose -f docker-compose.yml -f docker-compose.observability.yml \
-  --profile log-collector up -d diagnostic-agent
+DIAGNOSTIC_AGENT_LLM_PROVIDER=openai   # recommended on Windows/macOS dev
+OPENAI_API_KEY=sk-...                  # reused as the agent's OpenAI key
+# DIAGNOSTIC_AGENT_GRAFANA_TOKEN=...    # optional; enables Grafana annotations (see #187)
+```
 
-# Fully on-prem (Linux/GPU): add the local LLM and pull models
+> **Why OpenAI by default in dev?** The image's built-in default is `ollama`, but
+> the `ollama` container only starts under the `local-llm` profile. On a laptop
+> without a GPU, set `DIAGNOSTIC_AGENT_LLM_PROVIDER=openai` so the agent has a
+> working LLM without pulling multi-GB models.
+
+### 2. Bring up the stack (one command)
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml \
-  --profile local-llm --profile log-collector up -d ollama diagnostic-agent
+  --profile log-collector --profile diagnostic-agent up -d
+```
+
+This starts Prometheus, Loki, **Promtail** (`log-collector`), Alertmanager,
+Grafana, and the **diagnostic-agent**. Promtail is required or Loki has no logs;
+on Windows note the Docker-socket caveat in
+`docs/architecture/OBSERVABILITY_ARCHITECTURE.md`.
+
+### 3. (Alternative) fully on-prem with a local LLM
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  --profile log-collector --profile local-llm --profile diagnostic-agent up -d
 docker exec publishi-ollama ollama pull mistral:7b-instruct
 docker exec publishi-ollama ollama pull nomic-embed-text
 ```
 
-> The agent reads logs from Loki, which is populated by **Promtail** — start the
-> `log-collector` profile (and on Windows note the Docker-socket caveat in the
-> observability architecture doc).
+Leave `DIAGNOSTIC_AGENT_LLM_PROVIDER` at its `ollama` default (or set it
+explicitly) when using this path.
+
+### 4. Verify
+
+```bash
+curl http://localhost:8001/health
+# -> {"status":"ok","agent_initialized":true}
+
+docker logs publishi-diagnostic-agent --tail 50   # confirm Prometheus/Loki reachable
+```
 
 The agent listens on host port **8001** (`/alert`, `/health`). Alertmanager is
 already wired (`infrastructure/docker/alertmanager/alertmanager-dev.yml`) to POST
 firing `warning`/`critical` alerts to `http://diagnostic-agent:8000/alert`.
+
+> **Running the agent standalone** (without compose, e.g. for pytest): copy
+> `cp diagnostic-agent/.env.example diagnostic-agent/.env`. Its `AGENT_*` defaults
+> already point at the Docker DNS names (`prometheus:9090`, `loki:3100`,
+> `grafana:3000`, `ollama:11434`).
+
+See `docs/deployment/OBSERVABILITY_OPERATIONS_GUIDE.md` §8.6 for the operator view.
 
 ## Try it without an alert
 
