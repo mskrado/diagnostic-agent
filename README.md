@@ -59,12 +59,23 @@ The most important:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AGENT_LLM_PROVIDER` | `ollama` | `ollama` (on-prem) or `openai` (fast/CI) |
+| `AGENT_LLM_PROVIDER` | `openai` (compose DEV) / `ollama` (PROD) | `ollama` (on-prem) or `openai` (fast/CI) |
 | `AGENT_OLLAMA_MODEL` | `mistral:7b-instruct` | pulled via `ollama pull` |
 | `AGENT_OPENAI_API_KEY` | — | reuse platform `OPENAI_API_KEY` |
 | `AGENT_GRAFANA_TOKEN` | — | Editor (OSS DEV) or Viewer + `annotations:write` (Enterprise); empty disables Grafana |
 | `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Set `false` to skip annotation delivery |
 | `AGENT_RAG_ENABLED` | `true` | RAG degrades gracefully if off/empty |
+
+### RAG corpus
+
+Runbooks live in `runbooks/` (see `runbooks/README.md`). At startup the agent:
+
+- loads all `**/*.md` files;
+- splits with **chunk_size=800**, **chunk_overlap=80**;
+- retrieves **top_k=3** chunks per alert (`AGENT_RAG_TOP_K` if exposed).
+
+Restart the container after adding runbooks so Chroma rebuilds. Quality checks:
+`pytest tests/test_rag_eval.py`.
 
 ## DEV quickstart (observability overlay)
 
