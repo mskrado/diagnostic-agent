@@ -62,7 +62,8 @@ The most important:
 | `AGENT_LLM_PROVIDER` | `ollama` | `ollama` (on-prem) or `openai` (fast/CI) |
 | `AGENT_OLLAMA_MODEL` | `mistral:7b-instruct` | pulled via `ollama pull` |
 | `AGENT_OPENAI_API_KEY` | — | reuse platform `OPENAI_API_KEY` |
-| `AGENT_GRAFANA_TOKEN` | — | Viewer + `annotations:write`; empty disables Grafana |
+| `AGENT_GRAFANA_TOKEN` | — | Editor (OSS DEV) or Viewer + `annotations:write` (Enterprise); empty disables Grafana |
+| `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Set `false` to skip annotation delivery |
 | `AGENT_RAG_ENABLED` | `true` | RAG degrades gracefully if off/empty |
 
 ## DEV quickstart (observability overlay)
@@ -78,7 +79,46 @@ and maps them into the agent's `AGENT_*` settings:
 ```bash
 DIAGNOSTIC_AGENT_LLM_PROVIDER=openai   # recommended on Windows/macOS dev
 OPENAI_API_KEY=sk-...                  # reused as the agent's OpenAI key
-# DIAGNOSTIC_AGENT_GRAFANA_TOKEN=...    # optional; enables Grafana annotations (see #187)
+# DIAGNOSTIC_AGENT_GRAFANA_TOKEN=...    # optional; see "Grafana annotations" below
+```
+
+### Grafana annotations (optional, #187)
+
+Each diagnostic report can appear as a Grafana annotation aligned with the alert
+timestamp. Provision a dedicated service-account token once:
+
+```bash
+# Grafana must be running (observability overlay). Writes gitignored .env files.
+python scripts/provision_diagnostic_grafana_token.py --write-env
+
+# Windows wrapper:
+./scripts/provision-diagnostic-grafana-token.ps1 -WriteEnv
+```
+
+The script creates a `diagnostic-agent` service account, mints a token, verifies
+it can POST an annotation, and sets:
+
+- root `.env` → `DIAGNOSTIC_AGENT_GRAFANA_TOKEN` (compose injects `AGENT_GRAFANA_TOKEN`)
+- `diagnostic-agent/.env` → `AGENT_GRAFANA_TOKEN` + `AGENT_GRAFANA_ANNOTATIONS_ENABLED=true`
+
+**Token handling:** never commit real tokens. Both `.env` paths are gitignored.
+Rotate by re-running the script with `--rotate` (or `-Rotate`), updating `.env`,
+and restarting `diagnostic-agent`. Revoke old tokens under Grafana →
+Administration → Service accounts → diagnostic-agent.
+
+**OSS vs Enterprise:** Grafana OSS cannot attach `annotations:write` to a Viewer
+service account (Enterprise RBAC). DEV uses the **Editor** basic role as
+least-privilege for org-level annotations. PROD Enterprise target: Viewer +
+`fixed:annotations:writer` (tracked in epic #185 Phase 4).
+
+**Graceful degradation:** leave `DIAGNOSTIC_AGENT_GRAFANA_TOKEN` empty (or unset
+`AGENT_GRAFANA_TOKEN` for standalone runs). The agent still diagnoses alerts and
+writes the audit JSONL; it only skips Grafana calls (logged at INFO/WARNING).
+
+After provisioning, restart the agent if it is already running:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml restart diagnostic-agent
 ```
 
 > **Why OpenAI by default in dev?** The image's built-in default is `ollama`, but
