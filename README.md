@@ -59,34 +59,145 @@ The most important:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AGENT_LLM_PROVIDER` | `ollama` | `ollama` (on-prem) or `openai` (fast/CI) |
+| `AGENT_LLM_PROVIDER` | `openai` (compose DEV) / `ollama` (PROD) | `ollama` (on-prem) or `openai` (fast/CI) |
 | `AGENT_OLLAMA_MODEL` | `mistral:7b-instruct` | pulled via `ollama pull` |
 | `AGENT_OPENAI_API_KEY` | — | reuse platform `OPENAI_API_KEY` |
-| `AGENT_GRAFANA_TOKEN` | — | Viewer + `annotations:write`; empty disables Grafana |
+| `AGENT_GRAFANA_TOKEN` | — | Editor (OSS DEV) or Viewer + `annotations:write` (Enterprise); empty disables Grafana |
+| `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Set `false` to skip annotation delivery |
 | `AGENT_RAG_ENABLED` | `true` | RAG degrades gracefully if off/empty |
 
-## Run with the observability overlay
+### RAG corpus
+
+Runbooks live in `runbooks/` (see `runbooks/README.md`). At startup the agent:
+
+- loads all `**/*.md` files;
+- splits with **chunk_size=800**, **chunk_overlap=80**;
+- retrieves **top_k=3** chunks per alert (`AGENT_RAG_TOP_K` if exposed).
+
+Restart the container after adding runbooks so Chroma rebuilds. Quality checks:
+`pytest tests/test_rag_eval.py`.
+
+## DEV quickstart (observability overlay)
+
+The agent runs as an opt-in profile on top of the local LGTM stack. From the repo
+root:
+
+### 1. Configure the LLM backend (in the root `.env`)
+
+The compose overlay reads these from the **root** `.env` (copy from `env.example`)
+and maps them into the agent's `AGENT_*` settings:
 
 ```bash
-# OpenAI backend (fast, recommended on Windows/macOS dev):
-DIAGNOSTIC_AGENT_LLM_PROVIDER=openai \
-docker compose -f docker-compose.yml -f docker-compose.observability.yml \
-  --profile log-collector up -d diagnostic-agent
+DIAGNOSTIC_AGENT_LLM_PROVIDER=openai   # recommended on Windows/macOS dev
+OPENAI_API_KEY=sk-...                  # reused as the agent's OpenAI key
+# DIAGNOSTIC_AGENT_GRAFANA_TOKEN=...    # optional; see "Grafana annotations" below
+```
 
-# Fully on-prem (Linux/GPU): add the local LLM and pull models
+### Grafana annotations (optional, #187)
+
+Each diagnostic report can appear as a Grafana annotation aligned with the alert
+timestamp. Provision a dedicated service-account token once:
+
+```bash
+# Grafana must be running (observability overlay). Writes gitignored .env files.
+python scripts/provision_diagnostic_grafana_token.py --write-env
+
+# Windows wrapper:
+./scripts/provision-diagnostic-grafana-token.ps1 -WriteEnv
+```
+
+The script creates a `diagnostic-agent` service account, mints a token, verifies
+it can POST an annotation, and sets:
+
+- root `.env` → `DIAGNOSTIC_AGENT_GRAFANA_TOKEN` (compose injects `AGENT_GRAFANA_TOKEN`)
+- `diagnostic-agent/.env` → `AGENT_GRAFANA_TOKEN` + `AGENT_GRAFANA_ANNOTATIONS_ENABLED=true`
+
+**Token handling:** never commit real tokens. Both `.env` paths are gitignored.
+Rotate by re-running the script with `--rotate` (or `-Rotate`), updating `.env`,
+and restarting `diagnostic-agent`. Revoke old tokens under Grafana →
+Administration → Service accounts → diagnostic-agent.
+
+**OSS vs Enterprise:** Grafana OSS cannot attach `annotations:write` to a Viewer
+service account (Enterprise RBAC). DEV uses the **Editor** basic role as
+least-privilege for org-level annotations. PROD Enterprise target: Viewer +
+`fixed:annotations:writer` (tracked in epic #185 Phase 4).
+
+**Graceful degradation:** leave `DIAGNOSTIC_AGENT_GRAFANA_TOKEN` empty (or unset
+`AGENT_GRAFANA_TOKEN` for standalone runs). The agent still diagnoses alerts and
+writes the audit JSONL; it only skips Grafana calls (logged at INFO/WARNING).
+
+After provisioning, restart the agent if it is already running:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml restart diagnostic-agent
+```
+
+> **Why OpenAI by default in dev?** The image's built-in default is `ollama`, but
+> the `ollama` container only starts under the `local-llm` profile. On a laptop
+> without a GPU, set `DIAGNOSTIC_AGENT_LLM_PROVIDER=openai` so the agent has a
+> working LLM without pulling multi-GB models.
+
+### 2. Bring up the stack (one command)
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml \
-  --profile local-llm --profile log-collector up -d ollama diagnostic-agent
+  --profile log-collector --profile diagnostic-agent up -d
+```
+
+This starts Prometheus, Loki, **Promtail** (`log-collector`), Alertmanager,
+Grafana, and the **diagnostic-agent**. Promtail is required or Loki has no logs;
+on Windows note the Docker-socket caveat in
+`docs/architecture/OBSERVABILITY_ARCHITECTURE.md`.
+
+### 3. (Alternative) fully on-prem with a local LLM
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  --profile log-collector --profile local-llm --profile diagnostic-agent up -d
 docker exec publishi-ollama ollama pull mistral:7b-instruct
 docker exec publishi-ollama ollama pull nomic-embed-text
 ```
 
-> The agent reads logs from Loki, which is populated by **Promtail** — start the
-> `log-collector` profile (and on Windows note the Docker-socket caveat in the
-> observability architecture doc).
+Leave `DIAGNOSTIC_AGENT_LLM_PROVIDER` at its `ollama` default (or set it
+explicitly) when using this path.
+
+### 4. Verify
+
+```bash
+curl http://localhost:8001/health
+# -> {"status":"ok","agent_initialized":true}
+
+docker logs publishi-diagnostic-agent --tail 50   # confirm Prometheus/Loki reachable
+```
 
 The agent listens on host port **8001** (`/alert`, `/health`). Alertmanager is
 already wired (`infrastructure/docker/alertmanager/alertmanager-dev.yml`) to POST
 firing `warning`/`critical` alerts to `http://diagnostic-agent:8000/alert`.
+
+> **Running the agent standalone** (without compose, e.g. for pytest): copy
+> `cp diagnostic-agent/.env.example diagnostic-agent/.env`. Its `AGENT_*` defaults
+> already point at the Docker DNS names (`prometheus:9090`, `loki:3100`,
+> `grafana:3000`, `ollama:11434`).
+
+See `docs/deployment/OBSERVABILITY_OPERATIONS_GUIDE.md` §8.6 for the operator view.
+
+## Smoke test (#188)
+
+Repeatable end-to-end verification of the alert → agent → audit (→ Grafana) loop:
+
+```bash
+# Stack must be up (OpenAI key in root .env recommended for DEV):
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  --profile log-collector --profile diagnostic-agent up -d
+
+./scripts/diagnostic-agent-smoke-test.ps1
+./scripts/diagnostic-agent-smoke-test.ps1 -RealPath   # optional fault injection
+```
+
+The script checks `/health`, POSTs a synthetic alert with embedded tenant identifiers,
+verifies the audit JSONL line is redacted, and (when `DIAGNOSTIC_AGENT_GRAFANA_TOKEN`
+is set) confirms a Grafana annotation exists. Use `-SkipGrafana` to skip the optional
+annotation step.
 
 ## Try it without an alert
 
