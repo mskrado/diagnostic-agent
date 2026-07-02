@@ -14,6 +14,7 @@ from .clients.prometheus import PrometheusClient
 from .config import settings
 from .delivery.annotation import deliver_annotation
 from .delivery.audit import write_audit_record
+from .delivery.email import deliver_email
 from .dependency_map import get_dependency_map
 from .graph.build import build_diagnostic_graph
 from .graph.nodes import DiagnosticNodes
@@ -36,10 +37,11 @@ class DiagnosticAgent:
         )
         self.graph = build_diagnostic_graph(self.nodes)
         logger.info(
-            "DiagnosticAgent ready (llm=%s, rag=%s, grafana=%s)",
+            "DiagnosticAgent ready (llm=%s, rag=%s, grafana=%s, email=%s)",
             settings.llm_provider,
             self.rag.available,
             self.grafana.enabled,
+            settings.email_enabled,
         )
 
     def diagnose(self, alert: dict) -> dict:
@@ -56,4 +58,5 @@ class DiagnosticAgent:
 
         write_audit_record(report, final.get("llm_raw", ""))
         deliver_annotation(self.grafana, report)
+        deliver_email(report, alert)
         return report

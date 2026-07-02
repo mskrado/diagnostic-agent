@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     audit_log_dir: str = str(_BASE_DIR / "audit")
     grafana_annotations_enabled: bool = True
 
+    # SMTP diagnostic email (separate from Alertmanager alert email).
+    email_enabled: bool = True
+    email_to: str = "dev-alerts@localhost"
+    email_subject_prefix: str = "publishi"
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_from: str = "diagnostic-agent@publishi.local"
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = False
+    smtp_timeout: float = 15.0
+
     # --- Dependency map ---
     service_map_path: str = str(_BASE_DIR / "service_map.yaml")
 
