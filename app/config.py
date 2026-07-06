@@ -24,17 +24,17 @@ class Settings(BaseSettings):
     # Grafana calls (alerts pull + annotation delivery) gracefully.
     grafana_token: str = ""
 
-    # --- LLM provider: "ollama" (default, on-prem) or "openai" (fallback) ---
-    llm_provider: str = "ollama"
+    # --- LLM / embeddings (LangChain init_chat_model / init_embeddings) ---
+    # Provider names match LangChain model_provider / provider strings.
+    # Credentials come from standard SDK env vars (OPENAI_API_KEY, AWS_REGION, …).
+    chat_provider: str = "ollama"
+    chat_model: str = "mistral:7b-instruct"
+    embed_provider: str = "ollama"
+    embed_model: str = "nomic-embed-text"
     llm_temperature: float = 0.1
-
-    ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "mistral:7b-instruct"
-    ollama_embed_model: str = "nomic-embed-text"
-
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    openai_embed_model: str = "text-embedding-3-small"
+    # JSON passthrough for provider-specific kwargs (base_url, region_name, …).
+    chat_model_kwargs: str = "{}"
+    embed_model_kwargs: str = "{}"
 
     # --- RAG ---
     rag_enabled: bool = True

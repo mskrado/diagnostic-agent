@@ -11,9 +11,41 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from ..config import settings
-from .redact import redact_text
+from .redact import redact_log_lines, redact_text
 
 logger = logging.getLogger(__name__)
+
+_MAX_LOG_LINES_IN_EMAIL = 10
+
+
+def _format_log_source(log_source: dict) -> list[str]:
+    """Human-readable Loki source lines for the email body."""
+    if not log_source:
+        return ["  (source not recorded)"]
+    system = log_source.get("system") or "loki"
+    url = log_source.get("url") or "(unknown)"
+    logql = log_source.get("logql") or "(unknown)"
+    lookback = log_source.get("lookback_minutes")
+    level = log_source.get("level") or "ERROR|WARN"
+    svc = log_source.get("service") or "(unknown)"
+    lines = [
+        f"  System: {system}",
+        f"  URL: {url}",
+        f"  Service: {svc}",
+        f"  Level: {level}",
+        f"  LogQL: {logql}",
+    ]
+    if lookback is not None:
+        lines.append(f"  Lookback: {lookback}m")
+    return lines
+
+
+def _format_log_sample(logs: list[str]) -> list[str]:
+    """Redacted log lines for the email body (capped)."""
+    if not logs:
+        return ["  (none — Promtail/Loki may be down or no ERROR/WARN lines in window)"]
+    redacted = redact_log_lines([str(line) for line in logs[:_MAX_LOG_LINES_IN_EMAIL]])
+    return [f"  - {line}" for line in redacted]
 
 
 def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str, str, str]:
@@ -61,8 +93,13 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
         steps = []
     steps_block = "\n".join(f"  - {s}" for s in steps if s) or "  - (none)"
 
-    rag_used = (report.get("evidence") or {}).get("rag_used", False)
-    metrics = (report.get("evidence") or {}).get("metrics") or {}
+    evidence_block = report.get("evidence") or {}
+    rag_used = evidence_block.get("rag_used", False)
+    metrics = evidence_block.get("metrics") or {}
+    log_source = evidence_block.get("log_source") or {}
+    log_sample = evidence_block.get("error_log_sample") or []
+    source_lines = _format_log_source(log_source if isinstance(log_source, dict) else {})
+    log_lines = _format_log_sample(log_sample if isinstance(log_sample, list) else [])
 
     plain_parts = [
         f"Alert: {alert_type}",
@@ -84,6 +121,12 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
             "Suggested next steps (read-only):",
             steps_block,
             "",
+            "Log source:",
+            *source_lines,
+            "",
+            "Recent error/warn logs:",
+            *log_lines,
+            "",
             f"RAG used: {'yes' if rag_used else 'no'}",
             f"Metrics snapshot keys: {', '.join(sorted(metrics.keys())) or 'none'}",
             "",
@@ -92,6 +135,8 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
     )
     plain = redact_text("\n".join(plain_parts))
 
+    source_pre = "\n".join(line.strip() for line in source_lines)
+    logs_pre = "\n".join(line.strip() for line in log_lines)
     html = redact_text(
         "<html><body>"
         f"<h2>Diagnostic: {alert_type} on {service}</h2>"
@@ -107,6 +152,8 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
         )
         + f"<p><b>Blast radius:</b> {blast}</p>"
         f"<h3>Suggested next steps (read-only)</h3><pre>{steps_block}</pre>"
+        f"<h3>Log source</h3><pre>{source_pre}</pre>"
+        f"<h3>Recent error/warn logs</h3><pre>{logs_pre}</pre>"
         f"<p><small>RAG used: {'yes' if rag_used else 'no'} | "
         "Hypotheses only — no auto-remediation.</small></p>"
         "</body></html>"

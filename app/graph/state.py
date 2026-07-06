@@ -17,6 +17,7 @@ class DiagnosticState(TypedDict, total=False):
     blast_radius: list[str]
     prom_data: dict       # per-service metric snapshot
     loki_logs: list[str]  # extracted error messages
+    log_source: dict      # Loki query metadata (url, logql, lookback)
 
     # --- rag ---
     rag_context: str

@@ -1,60 +1,70 @@
 """Pluggable LLM + embeddings factory.
 
-Default provider is Ollama (fully on-prem, zero external calls -- the headline
-use case). Setting AGENT_LLM_PROVIDER=openai swaps in OpenAI, reusing the
-platform's existing OPENAI_API_KEY for fast iteration / CI where a local GPU
-isn't available.
+Chat and embedding backends are selected purely via environment variables
+(AGENT_CHAT_PROVIDER / AGENT_CHAT_MODEL / AGENT_EMBED_PROVIDER / …).
+LangChain's universal factories handle provider wiring; credentials are read
+from standard SDK env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY, AWS credential
+chain, etc.).
 
-LangChain chat/embedding objects are imported lazily so that installing only
-one provider's extras still works.
+To add a new provider: install its langchain-* package and set the env vars.
+No code changes required.
 """
 from __future__ import annotations
 
+import json
 import logging
+from typing import Any
+
+from langchain.chat_models import init_chat_model
+from langchain.embeddings import init_embeddings
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 
+def _kwargs(raw: str) -> dict[str, Any]:
+    """Parse a JSON kwargs string; empty or invalid -> {}."""
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid model kwargs JSON %r: %s; using {}", text, exc)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.warning("Model kwargs must be a JSON object; got %s; using {}", type(parsed))
+        return {}
+    return parsed
+
+
 def get_chat_model():
-    """Return a LangChain chat model configured for JSON output, temp from env."""
-    provider = settings.llm_provider.lower()
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        logger.info("LLM provider: openai (%s)", settings.openai_model)
-        return ChatOpenAI(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=settings.llm_temperature,
-            model_kwargs={"response_format": {"type": "json_object"}},
-        )
-
-    # default: ollama
-    from langchain_ollama import ChatOllama
-
-    logger.info("LLM provider: ollama (%s)", settings.ollama_model)
-    return ChatOllama(
-        model=settings.ollama_model,
-        base_url=settings.ollama_base_url,
-        temperature=settings.llm_temperature,
-        format="json",
+    """Return a LangChain chat model for the configured provider/model."""
+    kwargs = _kwargs(settings.chat_model_kwargs)
+    kwargs.setdefault("temperature", settings.llm_temperature)
+    logger.info(
+        "Chat model: provider=%s model=%s",
+        settings.chat_provider,
+        settings.chat_model,
+    )
+    return init_chat_model(
+        settings.chat_model,
+        model_provider=settings.chat_provider,
+        **kwargs,
     )
 
 
 def get_embeddings():
-    """Return a LangChain embeddings model matching the active provider."""
-    provider = settings.llm_provider.lower()
-    if provider == "openai":
-        from langchain_openai import OpenAIEmbeddings
-
-        return OpenAIEmbeddings(
-            model=settings.openai_embed_model, api_key=settings.openai_api_key
-        )
-
-    from langchain_ollama import OllamaEmbeddings
-
-    return OllamaEmbeddings(
-        model=settings.ollama_embed_model, base_url=settings.ollama_base_url
+    """Return a LangChain embeddings model for the configured provider/model."""
+    kwargs = _kwargs(settings.embed_model_kwargs)
+    logger.info(
+        "Embeddings: provider=%s model=%s",
+        settings.embed_provider,
+        settings.embed_model,
+    )
+    return init_embeddings(
+        settings.embed_model,
+        provider=settings.embed_provider,
+        **kwargs,
     )

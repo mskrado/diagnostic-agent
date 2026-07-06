@@ -95,14 +95,25 @@ class DiagnosticNodes:
         if pending is not None:
             prom_data[service]["db_pool_pending"] = pending
 
-        # Error logs for the affected service (Spring Boot JSON).
-        logql = f'{{service="{service}"}} | json | level="ERROR"'
+        # Error/warn logs for the affected service (Spring Boot JSON).
+        # Include WARN so smoke tests and soft failures (e.g. S3 health) appear
+        # in diagnostic emails when no ERROR lines exist yet.
+        logql = f'{{service="{service}"}} | json | level=~"ERROR|WARN"'
+        lookback = settings.loki_lookback_minutes
         raw_lines = self.loki.query_range(
             logql,
-            lookback_minutes=settings.loki_lookback_minutes,
+            lookback_minutes=lookback,
             limit=settings.loki_limit,
         )
         messages = self.loki.extract_messages(raw_lines)[:20]
+        log_source = {
+            "system": "loki",
+            "url": settings.loki_url,
+            "logql": logql,
+            "lookback_minutes": lookback,
+            "level": "ERROR|WARN",
+            "service": service,
+        }
 
         # Refine module hint from logs if not provided on the alert.
         module_hint = state.get("module_hint", "")
@@ -125,6 +136,7 @@ class DiagnosticNodes:
             "blast_radius": blast_radius,
             "prom_data": prom_data,
             "loki_logs": messages,
+            "log_source": log_source,
             "module_hint": module_hint,
         }
 
@@ -146,23 +158,32 @@ class DiagnosticNodes:
             f"Suspected module: {state.get('module_hint') or 'unknown'}\n"
             f"Dependencies checked: {state.get('dependencies')}\n"
             f"Metrics snapshot: {json.dumps(state.get('prom_data', {}))}\n"
-            f"Recent error logs (sample): {state.get('loki_logs', [])[:10]}\n"
+            f"Recent error/warn logs (sample): {state.get('loki_logs', [])[:10]}\n"
             f"Runbook / past-incident context: {state.get('rag_context') or 'none'}\n"
             f"Downstream services at risk: {state.get('blast_radius')}"
         )
         raw = ""
         try:
-            response = self.llm.invoke(
+            result = self.llm.invoke(
                 [
                     SystemMessage(content=SYSTEM_PROMPT),
                     HumanMessage(content=user_content),
                 ]
             )
-            raw = getattr(response, "content", "") or ""
-            hypotheses = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("LLM returned non-JSON; wrapping raw output")
-            hypotheses = {"error": "LLM did not return valid JSON", "raw": raw}
+            parsed = result.get("parsed") if isinstance(result, dict) else None
+            raw_msg = result.get("raw") if isinstance(result, dict) else None
+            raw = getattr(raw_msg, "content", "") or ""
+            if parsed is not None:
+                hypotheses = parsed.model_dump()
+            else:
+                parsing_error = (
+                    result.get("parsing_error") if isinstance(result, dict) else None
+                )
+                logger.warning("LLM structured output parse failed: %s", parsing_error)
+                hypotheses = {
+                    "error": "LLM did not return valid structured output",
+                    "raw": raw,
+                }
         except Exception as exc:  # noqa: BLE001 - never crash the graph on LLM errors
             logger.error("correlate failed: %s", exc)
             hypotheses = {"error": f"LLM call failed: {exc}"}
@@ -181,6 +202,7 @@ class DiagnosticNodes:
             "evidence": {
                 "metrics": state.get("prom_data", {}),
                 "error_log_sample": state.get("loki_logs", [])[:10],
+                "log_source": state.get("log_source") or {},
                 "rag_used": bool(state.get("rag_context")),
             },
         }

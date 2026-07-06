@@ -2,7 +2,7 @@
 
 publishi.ai's Promtail pipeline promotes `service`, `level` and `tenantId` to
 Loki labels and keeps the full Spring Boot JSON line as the log message. So a
-typical query is:  {service="platform-service"} | json | level="ERROR"
+typical query is:  {service="platform-service"} | json | level=~"ERROR|WARN"
 """
 from __future__ import annotations
 

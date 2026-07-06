@@ -21,7 +21,22 @@ def test_format_diagnosis_email_includes_hypothesis():
             "secondary_hypotheses": [{"cause": "redis timeout", "confidence": 40}],
             "suggested_next_steps": ["Check pg_stat_activity"],
         },
-        "evidence": {"rag_used": True, "metrics": {"platform-service": {"up": 1.0}}},
+        "evidence": {
+            "rag_used": True,
+            "metrics": {"platform-service": {"up": 1.0}},
+            "error_log_sample": [
+                "HikariPool: Connection is not available, tenant-smoke-test",
+                "JdbcTemplate: query failed for user 550e8400-e29b-41d4-a716-446655440000",
+            ],
+            "log_source": {
+                "system": "loki",
+                "url": "http://loki:3100",
+                "logql": '{service="platform-service"} | json | level=~"ERROR|WARN"',
+                "lookback_minutes": 15,
+                "level": "ERROR|WARN",
+                "service": "platform-service",
+            },
+        },
     }
     alert = {
         "annotations": {"summary": "5xx spike on platform-service"},
@@ -35,6 +50,36 @@ def test_format_diagnosis_email_includes_hypothesis():
     assert "redis timeout" in plain
     assert "pg_stat_activity" in plain
     assert "db pool saturation" in html
+    assert "Log source:" in plain
+    assert "http://loki:3100" in plain
+    assert 'service="platform-service"' in plain
+    assert "Lookback: 15m" in plain
+    assert "Recent error/warn logs:" in plain
+    assert "Connection is not available" in plain
+    assert "tenant-smoke-test" not in plain
+    assert "tenant-[REDACTED]" in plain
+    assert "550e8400-e29b-41d4-a716-446655440000" not in plain
+    assert "[UUID-REDACTED]" in plain
+    assert "Log source" in html
+    assert "Recent error/warn logs" in html
+    assert 'level=~"ERROR|WARN"' in plain
+    assert "http://loki:3100" in html
+
+
+def test_format_diagnosis_email_empty_logs():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "warning",
+        "blast_radius": [],
+        "diagnosis": {},
+        "evidence": {"rag_used": False, "metrics": {}, "error_log_sample": []},
+    }
+    _, plain, _ = format_diagnosis_email(report)
+    assert "Log source:" in plain
+    assert "source not recorded" in plain
+    assert "Recent error/warn logs:" in plain
+    assert "none" in plain
 
 
 def test_format_diagnosis_email_llm_error():
