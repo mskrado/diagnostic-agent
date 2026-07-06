@@ -121,18 +121,60 @@ and maps `DIAGNOSTIC_AGENT_*` → the agent's `AGENT_*` settings.
 #### Switch procedure (3 steps)
 
 1. Set the four knobs for chat (and embed, if different) in the root `.env`.
-2. If you changed the **embedding** provider/model, wipe the Chroma volume — the
-   vector dimensions change and a stale store will error or mismatch:
+2. If you changed the **embedding** provider/model, wipe the Chroma volume. Each
+   embedding model emits vectors of a fixed dimension (e.g. `nomic-embed-text` =
+   768, OpenAI `text-embedding-3-small` = 1536, Titan v2 = 1024). The persisted
+   Chroma store is created with the *first* model's dimension, so pointing it at a
+   new model makes queries fail or silently mismatch. The store is a Docker volume
+   (`diagnostic_agent_chroma`, mounted at `/app/chroma_db`) that survives restarts,
+   so you must delete it explicitly — the agent rebuilds it from `runbooks/` on the
+   next start.
+
+   **a. Find the exact volume name** (Compose prefixes it with the project name,
+   usually the repo folder, e.g. `publishiai_` or `publishi-ai_`):
 
 ```bash
-docker volume rm publishi_diagnostic_agent_chroma   # exact name: docker volume ls
+docker volume ls | Select-String chroma      # PowerShell
+# docker volume ls | grep chroma             # bash/macOS/Linux
+# -> local   publishiai_diagnostic_agent_chroma
 ```
+
+   **b. Stop the agent, remove the volume, then continue to step 3.** A volume
+   can't be removed while a container is using it, so stop first:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml \
+  --profile diagnostic-agent stop diagnostic-agent
+
+docker volume rm publishiai_diagnostic_agent_chroma   # use the name from step 2a
+```
+
+   If `docker volume rm` reports the volume is still in use, find and remove the
+   lingering container first:
+
+```bash
+docker ps -a | Select-String diagnostic-agent
+docker rm -f publishi-diagnostic-agent
+```
+
+   > Alternative (nukes all diagnostic-agent volumes incl. audit logs — avoid in
+   > PROD): `docker compose ... --profile diagnostic-agent down -v`.
+
+   If you only changed the **chat** model (not embeddings), skip this step
+   entirely — the vector store is unaffected.
 
 3. Recreate the agent (force-recreate so the new env is picked up):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml \
   --profile diagnostic-agent up -d --force-recreate diagnostic-agent
+```
+
+   On startup you should see the store rebuild in the logs:
+
+```bash
+docker logs publishi-diagnostic-agent 2>&1 | Select-String "RAG store built"
+# -> RAG store built: 42 chunks from 11 docs
 ```
 
 Verify the active backend in the logs:
