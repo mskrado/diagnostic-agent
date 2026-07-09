@@ -5,8 +5,11 @@ langchain-core>=0.3
 langchain-community>=0.3
 
 # --- Pluggable LLM backends (see app/llm.py) ---
-langchain-ollama>=0.2          # ChatOllama + OllamaEmbeddings (default, on-prem)
-langchain-openai>=0.2          # ChatOpenAI + OpenAIEmbeddings (fallback, reuses OPENAI_API_KEY)
+langchain-ollama>=0.2          # ollama (default, on-prem)
+langchain-openai>=0.2          # openai + OpenAI-compatible APIs (DeepSeek, etc.)
+langchain-aws>=0.2             # bedrock_converse + bedrock embeddings
+langchain-anthropic>=0.2       # anthropic
+langchain-google-genai>=2      # google_genai
 
 # --- RAG / vector store (optional, gated by RAG_ENABLED) ---
 langchain-chroma>=0.1
