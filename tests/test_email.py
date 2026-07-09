@@ -24,10 +24,6 @@ def test_format_diagnosis_email_includes_hypothesis():
         "evidence": {
             "rag_used": True,
             "metrics": {"platform-service": {"up": 1.0}},
-            "error_log_sample": [
-                "HikariPool: Connection is not available, tenant-smoke-test",
-                "JdbcTemplate: query failed for user 550e8400-e29b-41d4-a716-446655440000",
-            ],
             "log_source": {
                 "system": "loki",
                 "url": "http://loki:3100",
@@ -36,6 +32,12 @@ def test_format_diagnosis_email_includes_hypothesis():
                 "level": "ERROR|WARN",
                 "service": "platform-service",
             },
+            "error_log_sample": [
+                "HikariPool: Connection is not available, tenant-smoke-test",
+                "JdbcTemplate: query failed for user 550e8400-e29b-41d4-a716-446655440000",
+                "[2026-07-07T06:58:12.345Z] [trace_id=abc123] "
+                "OpenAIHealthIndicator: OpenAI health check failed: 401 Unauthorized",
+            ],
         },
     }
     alert = {
@@ -60,10 +62,12 @@ def test_format_diagnosis_email_includes_hypothesis():
     assert "tenant-[REDACTED]" in plain
     assert "550e8400-e29b-41d4-a716-446655440000" not in plain
     assert "[UUID-REDACTED]" in plain
+    assert "[trace_id=abc123]" in plain
     assert "Log source" in html
     assert "Recent error/warn logs" in html
     assert 'level=~"ERROR|WARN"' in plain
     assert "http://loki:3100" in html
+    assert "OpenAIHealthIndicator" in html
 
 
 def test_format_diagnosis_email_empty_logs():

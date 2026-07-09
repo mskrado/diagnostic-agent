@@ -100,12 +100,12 @@ class DiagnosticNodes:
         # in diagnostic emails when no ERROR lines exist yet.
         logql = f'{{service="{service}"}} | json | level=~"ERROR|WARN"'
         lookback = settings.loki_lookback_minutes
-        raw_lines = self.loki.query_range(
+        raw_entries = self.loki.query_range(
             logql,
             lookback_minutes=lookback,
             limit=settings.loki_limit,
         )
-        messages = self.loki.extract_messages(raw_lines)[:20]
+        messages = self.loki.format_log_entries(raw_entries)[:20]
         log_source = {
             "system": "loki",
             "url": settings.loki_url,
@@ -118,7 +118,7 @@ class DiagnosticNodes:
         # Refine module hint from logs if not provided on the alert.
         module_hint = state.get("module_hint", "")
         if not module_hint:
-            for line in raw_lines[:50]:
+            for _ts, line in raw_entries[:50]:
                 m = _MODULE_RE.search(line)
                 if m:
                     module_hint = m.group(1)

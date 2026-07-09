@@ -22,8 +22,8 @@ class LokiClient:
 
     def query_range(
         self, logql: str, lookback_minutes: int = 15, limit: int = 500
-    ) -> list[str]:
-        """Return raw log lines (newest first) for a LogQL query."""
+    ) -> list[tuple[str, str]]:
+        """Return (loki_ts_ns, raw_line) pairs, newest first, for a LogQL query."""
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=lookback_minutes)
         params = {
@@ -44,26 +44,43 @@ class LokiClient:
             logger.warning("Loki query failed (%s): %s", logql, exc)
             return []
 
-        lines: list[str] = []
+        entries: list[tuple[str, str]] = []
         for stream in streams:
-            for _ts, line in stream.get("values", []):
-                lines.append(line)
-        return lines
+            for ts_ns, line in stream.get("values", []):
+                entries.append((ts_ns, line))
+        return entries
 
     @staticmethod
-    def extract_messages(lines: list[str]) -> list[str]:
-        """Pull the human-readable `message` out of Spring Boot JSON log lines.
+    def format_log_entries(entries: list[tuple[str, str]]) -> list[str]:
+        """Format log lines for reports/email with timestamp and trace_id."""
+        return [LokiClient._format_log_entry(ts_ns, line) for ts_ns, line in entries]
 
-        Falls back to the raw line for non-JSON entries.
-        """
-        out: list[str] = []
-        for line in lines:
-            try:
-                doc = json.loads(line)
-                msg = doc.get("message") or doc.get("msg") or line
-                logger_name = doc.get("logger_name", "")
-                short = logger_name.split(".")[-1] if logger_name else ""
-                out.append(f"{short}: {msg}" if short else msg)
-            except (ValueError, AttributeError):
-                out.append(line)
-        return out
+    @staticmethod
+    def _format_log_entry(ts_ns: str, line: str) -> str:
+        """Pull message, @timestamp, and trace_id from Spring Boot JSON log lines."""
+        timestamp = LokiClient._loki_ts_to_iso(ts_ns)
+        trace_id = "n/a"
+        body = line
+        try:
+            doc = json.loads(line)
+            timestamp = doc.get("@timestamp") or timestamp
+            trace_id = doc.get("trace_id") or doc.get("traceId") or trace_id
+            msg = doc.get("message") or doc.get("msg") or line
+            logger_name = doc.get("logger_name", "")
+            short = logger_name.split(".")[-1] if logger_name else ""
+            body = f"{short}: {msg}" if short else msg
+        except (ValueError, AttributeError, TypeError):
+            pass
+        return f"[{timestamp}] [trace_id={trace_id}] {body}"
+
+    @staticmethod
+    def _loki_ts_to_iso(ts_ns: str) -> str:
+        try:
+            sec = int(ts_ns) / 1e9
+            return (
+                datetime.fromtimestamp(sec, tz=timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+        except (ValueError, TypeError, OSError):
+            return "unknown"
