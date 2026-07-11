@@ -26,12 +26,10 @@ def write_audit_record(report: dict, llm_raw: str) -> str | None:
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_version": _version(),
-            "llm_provider": settings.llm_provider,
-            "llm_model": (
-                settings.ollama_model
-                if settings.llm_provider == "ollama"
-                else settings.openai_model
-            ),
+            "chat_provider": settings.chat_provider,
+            "chat_model": settings.chat_model,
+            "embed_provider": settings.embed_provider,
+            "embed_model": settings.embed_model,
             "report": report,
             "llm_raw": llm_raw,
         }

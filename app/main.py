@@ -1,7 +1,8 @@
 """FastAPI trigger server.
 
 Alertmanager POSTs firing alerts to /alert. The agent runs the diagnostic graph
-for each firing alert and delivers an audit record + Grafana annotation.
+for each firing alert and delivers an audit record, Grafana annotation, and
+optional diagnostic email.
 
 Purely reactive -- no polling.
 """

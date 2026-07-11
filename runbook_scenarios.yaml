@@ -1,0 +1,161 @@
+# Synthetic Alertmanager scenarios — one entry per runbook-*.md in runbooks/.
+# Consumed by scripts/diagnostic-agent-runbook-e2e.py and pytest (test_runbook_scenarios.py).
+#
+# Live E2E: POST each scenario to diagnostic-agent /alert and assert structured report fields.
+# Offline:  rag_query + rag_must_contain verify the runbook corpus grounds each alert type.
+
+version: 1
+
+scenarios:
+  - id: high-error-rate
+    runbook: runbook-high-error-rate.md
+    description: 5xx spike on platform-service
+    labels:
+      alertname: HighErrorRate
+      service: platform-service
+      severity: warning
+    annotations:
+      summary: Synthetic HighErrorRate for runbook E2E
+    rag_query: HighErrorRate 5xx spike platform-service modular monolith
+    rag_must_contain:
+      - 5xx
+      - hikaricp
+
+  - id: db-pool-exhaustion
+    runbook: runbook-db-pool-exhaustion.md
+    description: HikariCP pool saturation on platform-service
+    labels:
+      alertname: HikariPoolExhaustion
+      service: platform-service
+      severity: critical
+    annotations:
+      summary: Synthetic HikariPoolExhaustion for runbook E2E
+    rag_query: HikariPoolExhaustion database connection pool exhausted hikaricp
+    rag_must_contain:
+      - hikaricp
+      - pool
+
+  - id: jvm-gc-pressure
+    runbook: runbook-jvm-gc-pressure.md
+    description: JVM GC pause / heap pressure
+    labels:
+      alertname: HighGcPauseTime
+      service: platform-service
+      severity: warning
+    annotations:
+      summary: Synthetic HighGcPauseTime for runbook E2E
+    rag_query: JvmGcPauseHigh heap GC pause platform-service
+    rag_must_contain:
+      - gc
+      - heap
+
+  - id: redis-connection-errors
+    runbook: runbook-redis-connection-errors.md
+    description: Redis / Lettuce connection failures in logs
+    labels:
+      alertname: RedisErrorsInLogs
+      service: platform-service
+      severity: warning
+    annotations:
+      summary: Synthetic RedisErrorsInLogs for runbook E2E
+    rag_query: RedisLogErrors redis lettuce connection timeout
+    rag_must_contain:
+      - redis
+      - lettuce
+
+  - id: elasticsearch-degraded
+    runbook: runbook-elasticsearch-degraded.md
+    description: Elasticsearch client errors in platform-service logs
+    labels:
+      alertname: ElasticsearchErrorsInLogs
+      service: platform-service
+      severity: warning
+    annotations:
+      summary: Synthetic ElasticsearchErrorsInLogs for runbook E2E
+    rag_query: ElasticsearchLogErrors elasticsearch RestClient search index
+    rag_must_contain:
+      - elasticsearch
+
+  - id: s3-media-errors
+    runbook: runbook-s3-media-errors.md
+    description: S3 / object storage failures for media module
+    labels:
+      alertname: ExternalApiErrorsInLogs
+      service: platform-service
+      severity: warning
+      module: media
+    annotations:
+      summary: Synthetic S3 media errors for runbook E2E
+    rag_query: S3MediaErrors AmazonS3 NoSuchBucket media object storage
+    rag_must_contain:
+      - s3
+
+  - id: openai-api-errors
+    runbook: runbook-openai-api-errors.md
+    description: OpenAI provider rate limits and API failures
+    labels:
+      alertname: OpenAiRateLimitInLogs
+      service: platform-service
+      severity: warning
+      module: ai
+    annotations:
+      summary: Synthetic OpenAI API errors for runbook E2E
+    rag_query: OpenAIApiErrors openai rate limit 429 ai module
+    rag_must_contain:
+      - openai
+
+  - id: smtp-delivery-failures
+    runbook: runbook-smtp-delivery-failures.md
+    description: Outbound SMTP / email delivery failures
+    labels:
+      alertname: ExternalApiErrorsInLogs
+      service: platform-service
+      severity: warning
+      module: notification
+    annotations:
+      summary: Synthetic SMTP delivery failures for runbook E2E
+    rag_query: SmtpDeliveryFailures smtp MailSend MessagingException email
+    rag_must_contain:
+      - smtp
+
+  - id: twilio-sms-failures
+    runbook: runbook-twilio-sms-failures.md
+    description: Twilio SMS / voice API failures
+    labels:
+      alertname: ExternalApiErrorsInLogs
+      service: platform-service
+      severity: warning
+      module: notification
+    annotations:
+      summary: Synthetic Twilio SMS failures for runbook E2E
+    rag_query: TwilioSmsFailures twilio TwilioRestException SMS
+    rag_must_contain:
+      - twilio
+
+  - id: host-disk-pressure
+    runbook: runbook-host-disk-pressure.md
+    description: Host filesystem running low (node_exporter)
+    labels:
+      alertname: HostDiskSpaceLow
+      service: host
+      severity: warning
+    annotations:
+      summary: Synthetic HostDiskSpaceLow for runbook E2E
+    rag_query: HostDiskSpaceLow node filesystem disk space low
+    rag_must_contain:
+      - disk
+      - filesystem
+
+  - id: container-restart-loop
+    runbook: runbook-container-restart-loop.md
+    description: Container crash-loop detected by cAdvisor
+    labels:
+      alertname: ContainerRestartLoop
+      service: container
+      severity: warning
+    annotations:
+      summary: Synthetic ContainerRestartLoop for runbook E2E
+      container_name: publishi-platform-service
+    rag_query: ContainerRestartLoop container restart crash loop OOM
+    rag_must_contain:
+      - restart
