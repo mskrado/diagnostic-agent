@@ -11,6 +11,32 @@ This is the agentic "brain" on top of publishi.ai's existing Grafana LGTM stack
 sidecar that deploys **only** with the observability overlay; the Java monolith
 is untouched.
 
+## Contents
+
+- [Architecture (5 layers, adapted to publishi.ai)](#architecture-5-layers-adapted-to-publishiai)
+- [Layout](#layout)
+- [Configuration](#configuration)
+  - [RAG corpus](#rag-corpus)
+- [DEV quickstart (observability overlay)](#dev-quickstart-observability-overlay)
+  - [1. Configure the LLM backend (in the root `.env`)](#1-configure-the-llm-backend-in-the-root-env)
+  - [Grafana annotations (optional, #187)](#grafana-annotations-optional-187)
+  - [Alert email via Mailpit (DEV) — two configurable emails](#alert-email-via-mailpit-dev--two-configurable-emails)
+  - [Where to read outputs (DEV)](#where-to-read-outputs-dev)
+  - [2. Bring up the stack (one command)](#2-bring-up-the-stack-one-command)
+  - [3. (Alternative) fully on-prem with a local LLM](#3-alternative-fully-on-prem-with-a-local-llm)
+  - [4. Verify](#4-verify)
+- [Smoke test (#188)](#smoke-test-188)
+- [Runbook scenario E2E](#runbook-scenario-e2e)
+- [Try it without an alert](#try-it-without-an-alert)
+- [Tests](#tests)
+- [Deploy to production (EC2)](#deploy-to-production-ec2)
+  - [Release the image (devel → main)](#release-the-image-devel--main)
+  - [Run on the EC2 host](#run-on-the-ec2-host)
+  - [Run with AWS Bedrock (no on-host Ollama)](#run-with-aws-bedrock-no-on-host-ollama)
+  - [PROD smoke test](#prod-smoke-test)
+  - [Rollout checklist](#rollout-checklist)
+- [Compliance](#compliance)
+
 ## Architecture (5 layers, adapted to publishi.ai)
 
 ```
@@ -229,7 +255,8 @@ AWS_REGION=us-east-1
 #   - Local dev: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (+ AWS_SESSION_TOKEN), or
 #                a named profile via {"credentials_profile_name":"myprofile"} in kwargs
 #   - EC2 PROD:  instance role (NO keys in .env) with IAM: bedrock:InvokeModel
-# Prereq: enable model access for both model IDs in the Bedrock console (per region).
+# Prereq: IAM allows InvokeModel. Serverless FMs auto-enable on first invoke
+# (Bedrock "Model access" UI is retired). Anthropic may ask for a one-time use-case form.
 ```
 
 #### Mixing providers (chat vs embeddings)
@@ -493,6 +520,195 @@ a Grafana token is set) posted as a Grafana annotation.
 python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 .venv/Scripts/python -m pytest -q
 ```
+
+## Deploy to production (EC2)
+
+In PROD the agent runs as an **observability sidecar** on EC2 from an **ECR
+image** (not a local `build:`), with **Ollama on-host** as the default LLM
+backend. Two stages: (1) publish the image via the release pipeline, (2) run it
+on the EC2 host. Full reference: `docs/deployment/DIAGNOSTIC_AGENT_PROD.md`.
+
+| | DEV (Docker Compose) | PROD (EC2) |
+|---|---|---|
+| Image | local `build: ./diagnostic-agent` | ECR `publishi/diagnostic-agent:<semver>` |
+| LLM backend | `openai` (default) | `ollama` on-host (or `bedrock_converse`) |
+| Credentials | API key in root `.env` | instance IAM role (Bedrock) / none (Ollama) |
+
+### Release the image (devel → main)
+
+Images are built and pushed to ECR by `.github/workflows/release.yml`, which runs
+on merge to `main`. Follow the issue/branch workflow — feature PRs land on
+`devel`; `main` only receives merges from `devel` behind a Release Checklist
+issue.
+
+```bash
+# 1. Land your change on devel via a normal feature PR (Closes #<issue>).
+# 2. Open the release PR devel -> main:
+gh pr create --base main --head devel \
+  --title "Release: <version> (devel → main)" \
+  --body "Release checklist: #<release-issue>"
+
+# 3. After green CI + review, merge. release.yml computes the next semver,
+#    builds every service (incl. diagnostic-agent), pushes to GHCR + ECR,
+#    deploys to EC2, and tags the release.
+```
+
+To build/push without a merge (coordinate to avoid duplicate deploys):
+
+```bash
+gh workflow run release.yml -f bump=patch     # or minor / major
+```
+
+### Run on the EC2 host
+
+On `/opt/publishi` with `.env` populated from `env.aws.example` (diagnostic +
+alerting keys). **Co-located** observability (default):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.aws.yml \
+  -f docker-compose.observability.yml -f docker-compose.aws-observability.yml \
+  --profile log-collector --profile diagnostic-agent --profile local-llm up -d
+```
+
+First-time Ollama model pull on the host:
+
+```bash
+docker exec publishi-ollama ollama pull mistral:7b-instruct
+docker exec publishi-ollama ollama pull nomic-embed-text
+```
+
+**Split EC2** (dedicated observability host) — run on the *obs* instance:
+
+```bash
+# .env must include PROD_EC2_PRIVATE_IP=<prod-private-ip>
+./scripts/render-remote-obs-config.sh
+
+docker compose \
+  -f docker-compose.observability-remote.yml \
+  -f docker-compose.aws-observability-remote.yml \
+  --profile diagnostic-agent --profile local-llm up -d
+# or from a workstation: ./scripts/ec2-deploy-obs.sh <OBS_EC2_PUBLIC_IP>
+```
+
+### Run with AWS Bedrock (no on-host Ollama)
+
+Recommended PROD path when you don't want to host models on the EC2 instance.
+Bedrock serves both chat (Converse API) and embeddings, so you **omit**
+`--profile local-llm` entirely — no Ollama container, no model pulls, less RAM.
+
+**1. Confirm models are usable in your region.** Bedrock’s **Model access** console
+page is retired. Serverless foundation models are **auto-enabled on first
+invoke** in each commercial region — you do not request access in the UI.
+Governance is IAM / SCPs only.
+
+Still do this once before relying on PROD:
+
+- Pick models in **Bedrock → Model catalog** (chat + embeddings) in `AWS_REGION`.
+- Optional: smoke them in the **Playground** or with `InvokeModel` / `Converse`.
+- **Anthropic** (our chat model): the first invoke in an account may require
+  submitting a short use-case form; complete that with an admin login before
+  the agent runs, or the first diagnostic call can fail.
+- Titan Embed Text v2 is an Amazon model and normally activates on first invoke
+  with no extra form (subject to IAM).
+
+**2. Grant the EC2 instance role permission.** Attach an IAM policy to the
+instance profile — **no AWS keys in `.env`**; the agent uses the instance role
+via the standard AWS credential chain:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DiagnosticAgentBedrockInvoke",
+    "Effect": "Allow",
+    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+    "Resource": [
+      "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v2:0",
+      "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
+    ]
+  }]
+}
+```
+
+**3. Set the provider knobs in `/opt/publishi/.env`** (replacing the Ollama
+defaults from `env.aws.example`):
+
+```bash
+DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
+DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v2:0
+DIAGNOSTIC_AGENT_EMBED_PROVIDER=bedrock
+DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
+DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
+DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"region_name":"us-east-1"}
+AWS_REGION=us-east-1
+# No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — the instance role supplies creds.
+```
+
+**4. Bring up the stack without `local-llm`** (co-located shown; drop the two
+observability overlays for the split-EC2 obs host as above):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.aws.yml \
+  -f docker-compose.observability.yml -f docker-compose.aws-observability.yml \
+  --profile log-collector --profile diagnostic-agent up -d
+```
+
+**5. Chroma dimension caveat.** Titan v2 embeddings are **1024-dim** vs Ollama
+`nomic-embed-text` **768-dim**. If the host previously ran with Ollama
+embeddings, the persisted Chroma store has the old dimension and queries will
+fail or mismatch — wipe the volume so the agent rebuilds it from `runbooks/`:
+
+```bash
+docker volume ls | grep chroma          # find the prefixed name
+docker compose ... stop diagnostic-agent
+docker volume rm <project>_diagnostic_agent_chroma
+docker compose ... up -d --force-recreate diagnostic-agent
+```
+
+Verify the active backend in the logs:
+
+```bash
+docker logs publishi-diagnostic-agent 2>&1 | grep -E "Chat model:|Embeddings:|RAG store built"
+# -> Chat model: provider=bedrock_converse model=anthropic.claude-3-5-haiku-...
+#    Embeddings: provider=bedrock model=amazon.titan-embed-text-v2:0
+```
+
+> Bedrock config background and the equivalent DEV walkthrough live in
+> [Example C](#example-c--aws-bedrock-chat--embeddings).
+
+Alertmanager Slack/PagerDuty secrets are **files** (no env expansion) — create
+them on the host before starting, or Alertmanager will not boot:
+
+```bash
+printf '%s' '<slack-webhook-url>'    > infrastructure/docker/alertmanager/secrets/slack_url
+printf '%s' '<pagerduty-routing-key>' > infrastructure/docker/alertmanager/secrets/pagerduty_key
+chmod 600 infrastructure/docker/alertmanager/secrets/*
+```
+
+### PROD smoke test
+
+From a workstation with an SSH tunnel to the agent (obs host in split mode):
+
+```powershell
+ssh -L 8001:127.0.0.1:8001 ec2-user@<EC2_HOST>
+./scripts/diagnostic-agent-smoke-test.ps1 -AgentUrl http://localhost:8001
+```
+
+Expect: `/health` 200, synthetic alert accepted, audit line written, Grafana
+annotation when a token is configured.
+
+### Rollout checklist
+
+- [ ] ECR image published via `release.yml` (or `deploy-ec2-manual.sh`)
+- [ ] **LLM backend ready:** Ollama models pulled on EC2, **or** Bedrock IAM
+      (`bedrock:InvokeModel`) on the instance role + Anthropic use-case accepted
+      if this is the account’s first Anthropic invoke
+- [ ] `.env` populated from `env.aws.example` (diagnostic + alerting keys); for
+      Bedrock, provider knobs set to `bedrock_converse`/`bedrock` + `AWS_REGION`
+- [ ] Chroma volume wiped if the embedding model/dimension changed
+- [ ] Alertmanager `slack_url` / `pagerduty_key` secret files present
+- [ ] Stack up with `diagnostic-agent` profile (`+ local-llm` only for Ollama)
+- [ ] Fire a test alert or run the smoke script; confirm Slack/PagerDuty routes
 
 ## Compliance
 
