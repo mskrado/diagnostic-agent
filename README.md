@@ -93,14 +93,14 @@ The most important:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AGENT_CHAT_PROVIDER` | `openai` (compose DEV) / `ollama` (PROD) | LangChain provider string (`openai`, `ollama`, `anthropic`, `google_genai`, `bedrock_converse`, …) |
-| `AGENT_CHAT_MODEL` | `gpt-4o-mini` / `mistral:7b-instruct` | Chat model ID for the provider |
-| `AGENT_EMBED_PROVIDER` | same family as chat | Embeddings provider (`openai`, `ollama`, `bedrock`, …) |
-| `AGENT_EMBED_MODEL` | `text-embedding-3-small` / `nomic-embed-text` | Embedding model ID |
-| `AGENT_CHAT_MODEL_KWARGS` | `{}` | JSON passthrough (`base_url`, `region_name`, …) |
-| `AGENT_EMBED_MODEL_KWARGS` | `{}` | JSON passthrough for embeddings |
+| `AGENT_CHAT_PROVIDER` | `bedrock_converse` (DEV/PROD default) | LangChain provider string (`bedrock_converse`, `openai`, `ollama`, `anthropic`, `google_genai`, …) |
+| `AGENT_CHAT_MODEL` | `amazon.nova-micro-v1:0` | Chat model ID for the provider |
+| `AGENT_EMBED_PROVIDER` | `bedrock` (DEV/PROD default) | Embeddings provider (`bedrock`, `openai`, `ollama`, …) |
+| `AGENT_EMBED_MODEL` | `amazon.titan-embed-text-v2:0` | Embedding model ID |
+| `AGENT_CHAT_MODEL_KWARGS` | `{"region_name":"us-east-1"}` | JSON passthrough (`base_url`, `region_name`, …) |
+| `AGENT_EMBED_MODEL_KWARGS` | `{"region_name":"us-east-1"}` | JSON passthrough for embeddings |
 | `AGENT_LLM_TEMPERATURE` | `0.1` | Chat temperature |
-| `OPENAI_API_KEY` | — | Standard SDK env (not `AGENT_`-prefixed); also `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, AWS credential chain |
+| `OPENAI_API_KEY` | — | When using OpenAI override; also `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or agent-scoped AWS creds (`DIAGNOSTIC_AGENT_AWS_*`) |
 | `AGENT_GRAFANA_TOKEN` | — | Editor (OSS DEV) or Viewer + `annotations:write` (Enterprise); empty disables Grafana |
 | `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Set `false` to skip annotation delivery |
 | `AGENT_EMAIL_ENABLED` | `true` | SMTP diagnostic email (hypotheses); separate from Alertmanager alert mail |
@@ -139,7 +139,7 @@ Chat and embeddings are configured independently with the same four knobs each:
 | **Provider** | `DIAGNOSTIC_AGENT_CHAT_PROVIDER` | `DIAGNOSTIC_AGENT_EMBED_PROVIDER` | LangChain provider string (`openai`, `ollama`, `bedrock_converse`/`bedrock`, `anthropic`, `google_genai`, …) |
 | **Model** | `DIAGNOSTIC_AGENT_CHAT_MODEL` | `DIAGNOSTIC_AGENT_EMBED_MODEL` | Model ID as the provider names it |
 | **Kwargs** | `DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS` | `DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS` | JSON blob of extra args (`base_url`, `region_name`, …); omit/`{}` if none |
-| **Credentials** | *(SDK env var, not `AGENT_`-prefixed)* | same | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or the AWS credential chain |
+| **Credentials** | *(SDK env var, not `AGENT_`-prefixed)* | same | Bedrock: `DIAGNOSTIC_AGENT_AWS_*` (agent-only; not MinIO `AWS_*`). Also `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or EC2 instance role in PROD |
 
 The compose overlay reads these from the **root** `.env` (copy from `env.example`)
 and maps `DIAGNOSTIC_AGENT_*` → the agent's `AGENT_*` settings.
@@ -207,11 +207,36 @@ Verify the active backend in the logs:
 
 ```bash
 docker logs publishi-diagnostic-agent 2>&1 | Select-String "Chat model:|Embeddings:|DiagnosticAgent ready"
-# -> Chat model: provider=openai model=gpt-4o-mini
-#    Embeddings: provider=openai model=text-embedding-3-small
+# -> Chat model: provider=bedrock_converse model=amazon.nova-micro-v1:0
+#    Embeddings: provider=bedrock model=amazon.titan-embed-text-v2:0
 ```
 
-#### Example A — OpenAI (chat + embeddings)
+#### Example A — AWS Bedrock (DEV/PROD default: Nova Micro + Titan)
+
+Chat uses the Converse API (`bedrock_converse`); embeddings use `bedrock`.
+Compose defaults match PROD. Use **agent-only** AWS keys so MinIO keeps working:
+
+```bash
+DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
+DIAGNOSTIC_AGENT_CHAT_MODEL=amazon.nova-micro-v1:0
+DIAGNOSTIC_AGENT_EMBED_PROVIDER=bedrock
+DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
+DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
+DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"region_name":"us-east-1"}
+AWS_REGION=us-east-1
+# Local DEV — agent-only (do NOT set shared AWS_ACCESS_KEY_ID for Bedrock):
+DIAGNOSTIC_AGENT_AWS_ACCESS_KEY_ID=AKIA...
+DIAGNOSTIC_AGENT_AWS_SECRET_ACCESS_KEY=...
+# DIAGNOSTIC_AGENT_AWS_SESSION_TOKEN=...   # if temporary creds
+# Or named profile + compose override mounting host ~/.aws at /root/.aws:
+#   DIAGNOSTIC_AGENT_AWS_PROFILE=your-profile
+#   volumes: - ${DIAGNOSTIC_AGENT_AWS_CONFIG_DIR}:/root/.aws:ro
+# EC2 PROD: instance role (NO keys in .env) with IAM bedrock:InvokeModel
+# Prereq: IAM allows InvokeModel on Nova + Titan
+# (infrastructure/iam/policy-bedrock-invoke.json).
+```
+
+#### Example B — OpenAI (chat + embeddings override)
 
 ```bash
 DIAGNOSTIC_AGENT_CHAT_PROVIDER=openai
@@ -219,10 +244,10 @@ DIAGNOSTIC_AGENT_CHAT_MODEL=gpt-4o-mini
 DIAGNOSTIC_AGENT_EMBED_PROVIDER=openai
 DIAGNOSTIC_AGENT_EMBED_MODEL=text-embedding-3-small
 OPENAI_API_KEY=sk-...                 # your OpenAI key
-# no kwargs needed for stock OpenAI
+# Wipe Chroma when leaving Titan embeddings (dim change).
 ```
 
-#### Example B — Ollama (fully on-prem, chat + embeddings)
+#### Example C — Ollama (fully on-prem, chat + embeddings)
 
 Point `base_url` at the Ollama host. Use `http://ollama:11434` with the bundled
 `--profile local-llm` container, or a remote host IP.
@@ -239,9 +264,7 @@ DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"base_url":"http://ollama:11434"}
 #   docker exec publishi-ollama ollama pull nomic-embed-text
 ```
 
-#### Example C — AWS Bedrock (chat + embeddings)
-
-Chat uses the Converse API (`bedrock_converse`); embeddings use `bedrock`.
+#### Example D — AWS Bedrock Claude (optional chat model)
 
 ```bash
 DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
@@ -251,12 +274,9 @@ DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
 DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
 DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"region_name":"us-east-1"}
 AWS_REGION=us-east-1
-# Credentials via the standard AWS chain:
-#   - Local dev: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (+ AWS_SESSION_TOKEN), or
-#                a named profile via {"credentials_profile_name":"myprofile"} in kwargs
-#   - EC2 PROD:  instance role (NO keys in .env) with IAM: bedrock:InvokeModel
-# Prereq: IAM allows InvokeModel. Serverless FMs auto-enable on first invoke
-# (Bedrock "Model access" UI is retired). Anthropic may ask for a one-time use-case form.
+DIAGNOSTIC_AGENT_AWS_ACCESS_KEY_ID=...
+DIAGNOSTIC_AGENT_AWS_SECRET_ACCESS_KEY=...
+# Anthropic may require a one-time use-case form on first invoke.
 ```
 
 #### Mixing providers (chat vs embeddings)
@@ -396,10 +416,10 @@ Operator details: `docs/deployment/OBSERVABILITY_OPERATIONS_GUIDE.md` §8.3.1.
 | **POST /alert response** | Same structured report as audit (immediate) | Smoke test / `curl` to `:8001/alert` |
 | **Alertmanager UI** | Active alerts, silences | http://localhost:9093 |
 
-> **Why OpenAI by default in dev?** The image default is `ollama`, but
-> the `ollama` container only starts under the `local-llm` profile. On a laptop
-> without a GPU, set `DIAGNOSTIC_AGENT_CHAT_PROVIDER=openai` so the agent has a
-> working LLM without pulling multi-GB models.
+> **DEV LLM default is Bedrock** (same Nova Micro + Titan as PROD). Set
+> `DIAGNOSTIC_AGENT_AWS_*` in root `.env` (not shared MinIO `AWS_ACCESS_KEY_ID`).
+> Override to OpenAI or `--profile local-llm` + Ollama when you have no AWS IAM.
+> Wipe `*_diagnostic_agent_chroma` when switching embedding providers.
 
 ### 2. Bring up the stack (one command)
 
@@ -524,15 +544,15 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 ## Deploy to production (EC2)
 
 In PROD the agent runs as an **observability sidecar** on EC2 from an **ECR
-image** (not a local `build:`), with **Ollama on-host** as the default LLM
-backend. Two stages: (1) publish the image via the release pipeline, (2) run it
-on the EC2 host. Full reference: `docs/deployment/DIAGNOSTIC_AGENT_PROD.md`.
+image** (not a local `build:`), with **Bedrock** (Nova Micro + Titan) as the
+default LLM backend. Two stages: (1) publish the image via the release pipeline,
+(2) run it on the EC2 host. Full reference: `docs/deployment/DIAGNOSTIC_AGENT_PROD.md`.
 
 | | DEV (Docker Compose) | PROD (EC2) |
 |---|---|---|
 | Image | local `build: ./diagnostic-agent` | ECR `publishi/diagnostic-agent:<semver>` |
-| LLM backend | `openai` (default) | `ollama` on-host (or `bedrock_converse`) |
-| Credentials | API key in root `.env` | instance IAM role (Bedrock) / none (Ollama) |
+| LLM backend | Bedrock Nova Micro + Titan (default) | Bedrock Nova Micro + Titan (instance role) |
+| Credentials | `DIAGNOSTIC_AGENT_AWS_*` in root `.env` (not MinIO `AWS_*`) | EC2 instance IAM role |
 
 ### Release the image (devel → main)
 
@@ -669,12 +689,12 @@ Verify the active backend in the logs:
 
 ```bash
 docker logs publishi-diagnostic-agent 2>&1 | grep -E "Chat model:|Embeddings:|RAG store built"
-# -> Chat model: provider=bedrock_converse model=anthropic.claude-3-5-haiku-...
+# -> Chat model: provider=bedrock_converse model=amazon.nova-micro-v1:0
 #    Embeddings: provider=bedrock model=amazon.titan-embed-text-v2:0
 ```
 
 > Bedrock config background and the equivalent DEV walkthrough live in
-> [Example C](#example-c--aws-bedrock-chat--embeddings).
+> [Example A](#example-a--aws-bedrock-devprod-default-nova-micro--titan).
 
 Alertmanager Slack/PagerDuty secrets are **files** (no env expansion) — create
 them on the host before starting, or Alertmanager will not boot:
