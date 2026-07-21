@@ -1,8 +1,9 @@
 """NIST-aligned audit logging.
 
 Every diagnostic run is appended to a per-day JSONL file with a timestamp, the
-full report, and the raw LLM output. This is the auditable record of what the
-agent saw and concluded. Tenant identifiers are redacted before writing.
+full report, the exact LLM system/user prompts (incl. RAG context), token usage,
+and the raw LLM output. This is the auditable record of what the agent saw and
+concluded. Tenant identifiers are redacted before writing.
 """
 from __future__ import annotations
 
@@ -18,11 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 def write_audit_record(report: dict, llm_raw: str) -> str | None:
-    """Append a redacted audit record; return the file path written, or None."""
+    """Append a redacted audit record; return the file path written, or None.
+
+    Top-level ``llm_exchange`` mirrors ``report.llm_exchange`` so prompts and
+    tokens are easy to pull with jq without walking the full report tree.
+    """
     try:
         os.makedirs(settings.audit_log_dir, exist_ok=True)
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = os.path.join(settings.audit_log_dir, f"diagnostics-{day}.jsonl")
+        exchange = report.get("llm_exchange") or {}
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_version": _version(),
@@ -30,13 +36,24 @@ def write_audit_record(report: dict, llm_raw: str) -> str | None:
             "chat_model": settings.chat_model,
             "embed_provider": settings.embed_provider,
             "embed_model": settings.embed_model,
-            "report": report,
+            # Easy retrieval: prompts + tokens at the top level
+            "llm_exchange": exchange,
             "llm_raw": llm_raw,
+            "report": report,
         }
         line = redact_text(json.dumps(record, default=str))
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        logger.info("audit record written: %s", path)
+        usage = exchange.get("token_usage") or {}
+        logger.info(
+            "audit record written: %s tokens_in=%s tokens_out=%s tokens_total=%s "
+            "rag_used=%s",
+            path,
+            usage.get("input_tokens"),
+            usage.get("output_tokens"),
+            usage.get("total_tokens"),
+            exchange.get("rag_used"),
+        )
         return path
     except OSError as exc:
         logger.error("failed to write audit record: %s", exc)

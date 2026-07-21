@@ -35,7 +35,14 @@ def test_correlate_structured_output_success():
     llm = MagicMock()
     llm.invoke.return_value = {
         "parsed": diagnosis,
-        "raw": AIMessage(content='{"primary_hypothesis":{}}'),
+        "raw": AIMessage(
+            content='{"primary_hypothesis":{}}',
+            usage_metadata={
+                "input_tokens": 111,
+                "output_tokens": 22,
+                "total_tokens": 133,
+            },
+        ),
     }
     nodes = _nodes_with_llm(llm)
     state = {
@@ -45,13 +52,25 @@ def test_correlate_structured_output_success():
         "module_hint": "",
         "dependencies": [],
         "prom_data": {},
-        "loki_logs": [],
-        "rag_context": "",
+        "loki_logs": ["HikariPool: Connection is not available"],
+        "rag_context": "pool exhaustion runbook",
         "blast_radius": [],
     }
     out = nodes.correlate(state)
     assert out["hypotheses"]["primary_hypothesis"]["cause"] == "DB pool exhausted"
     assert out["llm_raw"] == '{"primary_hypothesis":{}}'
+    assert "diagnostic agent" in out["llm_system_prompt"].lower()
+    assert "HighErrorRate" in out["llm_user_prompt"]
+    assert "pool exhaustion runbook" in out["llm_user_prompt"]
+    assert out["llm_token_usage"]["input_tokens"] == 111
+    assert out["llm_token_usage"]["output_tokens"] == 22
+
+    reported = nodes.report(out)
+    exchange = reported["report"]["llm_exchange"]
+    assert exchange["rag_used"] is True
+    assert exchange["rag_context"] == "pool exhaustion runbook"
+    assert exchange["token_usage"]["total_tokens"] == 133
+    assert exchange["user_prompt"] == out["llm_user_prompt"]
 
 
 def test_correlate_structured_output_parse_failure():

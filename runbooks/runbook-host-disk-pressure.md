@@ -19,6 +19,12 @@ or audit logs may fill the volume and cause cascading failures.
 ## Blast radius
 All containers on the host; write-heavy services fail first (ES, Loki, Postgres).
 
+## Example log lines (synthetic)
+```json
+{"@timestamp":"2026-07-20T20:14:05.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef01234567890123456789012","message":"Free disk space below threshold: path=/var/lib/docker free=1.2GB total=40GB (3%); writes may fail"}
+{"@timestamp":"2026-07-20T20:14:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef01234567890123456789013","message":"could not write to file: No space left on device"}
+```
+
 ## Hypotheses-only
 This runbook supports surfacing hypotheses. Do NOT auto-remediate; a human
 confirms and acts.
