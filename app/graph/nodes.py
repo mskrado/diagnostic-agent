@@ -19,6 +19,7 @@ from ..clients.loki import LokiClient
 from ..clients.prometheus import PrometheusClient
 from ..config import settings
 from ..dependency_map import DependencyMap
+from ..llm_usage import extract_token_usage
 from ..rag.store import RagStore
 from .prompts import SYSTEM_PROMPT
 from .state import DiagnosticState
@@ -163,6 +164,7 @@ class DiagnosticNodes:
             f"Downstream services at risk: {state.get('blast_radius')}"
         )
         raw = ""
+        token_usage = extract_token_usage(None)
         try:
             result = self.llm.invoke(
                 [
@@ -173,6 +175,7 @@ class DiagnosticNodes:
             parsed = result.get("parsed") if isinstance(result, dict) else None
             raw_msg = result.get("raw") if isinstance(result, dict) else None
             raw = getattr(raw_msg, "content", "") or ""
+            token_usage = extract_token_usage(raw_msg)
             if parsed is not None:
                 hypotheses = parsed.model_dump()
             else:
@@ -187,10 +190,32 @@ class DiagnosticNodes:
         except Exception as exc:  # noqa: BLE001 - never crash the graph on LLM errors
             logger.error("correlate failed: %s", exc)
             hypotheses = {"error": f"LLM call failed: {exc}"}
-        return {**state, "hypotheses": hypotheses, "llm_raw": raw}
+
+        rag_ctx = state.get("rag_context") or ""
+        logger.info(
+            "llm_exchange alert=%s service=%s tokens_in=%s tokens_out=%s "
+            "tokens_total=%s rag_used=%s rag_chars=%d user_prompt_chars=%d",
+            state.get("alert_type"),
+            state.get("service"),
+            token_usage.get("input_tokens"),
+            token_usage.get("output_tokens"),
+            token_usage.get("total_tokens"),
+            bool(rag_ctx),
+            len(rag_ctx),
+            len(user_content),
+        )
+        return {
+            **state,
+            "hypotheses": hypotheses,
+            "llm_raw": raw,
+            "llm_system_prompt": SYSTEM_PROMPT,
+            "llm_user_prompt": user_content,
+            "llm_token_usage": token_usage,
+        }
 
     # ---- report --------------------------------------------------------
     def report(self, state: DiagnosticState) -> DiagnosticState:
+        rag_ctx = state.get("rag_context") or ""
         report = {
             "service": state.get("service"),
             "alert_type": state.get("alert_type"),
@@ -203,7 +228,16 @@ class DiagnosticNodes:
                 "metrics": state.get("prom_data", {}),
                 "error_log_sample": state.get("loki_logs", [])[:10],
                 "log_source": state.get("log_source") or {},
-                "rag_used": bool(state.get("rag_context")),
+                "rag_used": bool(rag_ctx),
+            },
+            # Full prompts + tokens for RAG effectiveness / cost (also in audit JSONL).
+            "llm_exchange": {
+                "system_prompt": state.get("llm_system_prompt") or SYSTEM_PROMPT,
+                "user_prompt": state.get("llm_user_prompt") or "",
+                "rag_context": rag_ctx,
+                "rag_used": bool(rag_ctx),
+                "token_usage": state.get("llm_token_usage")
+                or extract_token_usage(None),
             },
         }
         return {**state, "report": report}

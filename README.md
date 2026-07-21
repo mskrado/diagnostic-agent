@@ -391,10 +391,70 @@ Operator details: `docs/deployment/OBSERVABILITY_OPERATIONS_GUIDE.md` §8.3.1.
 |---|---|---|
 | **Mailpit — alert email** | Firing alert from Alertmanager | http://localhost:8025 |
 | **Mailpit — diagnostic email** | Agent hypotheses + evidence | http://localhost:8025 |
-| **Audit JSONL** | Full report, metrics snapshot, log sample, LLM raw output | `docker exec publishi-diagnostic-agent tail /app/audit/diagnostics-<UTC-date>.jsonl` |
+| **Audit JSONL** | Full report, **`llm_exchange`** (system/user prompts, RAG context, token usage), `llm_raw` | `docker exec publishi-diagnostic-agent tail /app/audit/diagnostics-<UTC-date>.jsonl` |
+| **Container logs** | One-line `llm_exchange … tokens_in=… tokens_out=… rag_used=…` per diagnosis | `docker logs publishi-diagnostic-agent` |
 | **Grafana annotation** | Compact hypothesis summary on dashboards | Dashboard with tag filter `diagnostic-agent` (see above) |
-| **POST /alert response** | Same structured report as audit (immediate) | Smoke test / `curl` to `:8001/alert` |
+| **POST /alert response** | Same structured report (incl. `llm_exchange`) | Smoke test / `curl` to `:8001/alert` |
 | **Alertmanager UI** | Active alerts, silences | http://localhost:9093 |
+
+#### Retrieving prompts + tokens (RAG / cost eval)
+
+Every diagnosis stores an `llm_exchange` object (top-level in the audit line **and**
+under `report.llm_exchange` / the `/alert` JSON):
+
+| Field | Meaning |
+|---|---|
+| `system_prompt` | Exact system message sent to the LLM |
+| `user_prompt` | Exact human message (alert, metrics, logs, RAG slot) |
+| `rag_context` | Retrieved runbook chunks (empty string if RAG off / miss) |
+| `rag_used` | `true` if `rag_context` was non-empty |
+| `token_usage.input_tokens` | Prompt tokens (null if provider did not report) |
+| `token_usage.output_tokens` | Completion tokens |
+| `token_usage.total_tokens` | Sum when available |
+| `token_usage.source` | `usage_metadata` \| `response_metadata` \| `unavailable` |
+| `llm_raw` (sibling field) | Exact raw model text returned |
+
+**PowerShell — last audit line, prompts + tokens:**
+
+```powershell
+$day = [DateTime]::UtcNow.ToString("yyyy-MM-dd")
+docker exec publishi-diagnostic-agent tail -n 1 "/app/audit/diagnostics-$day.jsonl" |
+  python -c @"
+import sys, json
+r = json.loads(sys.stdin.read())
+ex = r.get('llm_exchange') or {}
+u = ex.get('token_usage') or {}
+print('model:', r.get('chat_provider'), r.get('chat_model'))
+print('tokens_in/out/total:', u.get('input_tokens'), u.get('output_tokens'), u.get('total_tokens'),
+      '(source=%s)' % u.get('source'))
+print('rag_used:', ex.get('rag_used'), 'rag_chars:', len(ex.get('rag_context') or ''))
+print('--- SYSTEM ---'); print(ex.get('system_prompt'))
+print('--- USER ---'); print(ex.get('user_prompt'))
+print('--- RAG ---'); print(ex.get('rag_context') or '(none)')
+print('--- llm_raw ---'); print(r.get('llm_raw'))
+"@
+```
+
+**Bash / jq — tokens only across today’s file:**
+
+```bash
+docker exec publishi-diagnostic-agent sh -c \
+  'cat /app/audit/diagnostics-$(date -u +%F).jsonl' |
+  jq -c '{ts:.timestamp, alert:.report.alert_type,
+          in:.llm_exchange.token_usage.input_tokens,
+          out:.llm_exchange.token_usage.output_tokens,
+          rag:.llm_exchange.rag_used}'
+```
+
+**Container log grep (cost at a glance):**
+
+```bash
+docker logs publishi-diagnostic-agent 2>&1 | findstr /C:"llm_exchange"
+# or: grep llm_exchange
+```
+
+Compare RAG-on vs RAG-off by inspecting `rag_context` / `rag_used` on successive
+runs (restart with `DIAGNOSTIC_AGENT_RAG_ENABLED=false` for the blind baseline).
 
 > **Why OpenAI by default in dev?** The image default is `ollama`, but
 > the `ollama` container only starts under the `local-llm` profile. On a laptop
