@@ -1,0 +1,202 @@
+# Blind diagnostic eval dataset.
+#
+# PURPOSE: measure how well the LLM identifies a root cause from LOGS ALONE,
+# with NO runbook/RAG context and NO hints. Each case injects raw Spring Boot
+# JSON log lines (as they would appear in Loki) and declares independent ground
+# truth. The runbooks are deliberately NOT referenced here so nothing leaks the
+# answer to the model.
+#
+# Consumed by eval/run_blind_eval.py.
+#
+# Per-case fields:
+#   id            unique case id
+#   system        the ground-truth system/domain (for aggregate accuracy)
+#   alert         Alertmanager-style labels (drives detect/service resolution)
+#   metrics       optional Prometheus snapshot the model also sees ({} = logs only)
+#   logs          raw log lines injected as the model's evidence
+#   expected:
+#     cause_keywords  any-of => the model named the right system/cause
+#     must_reference  tokens that SHOULD appear in evidence (grounding / anti-hallucination)
+#     root_cause      natural-language ground truth (used by the optional LLM judge)
+
+version: 1
+
+cases:
+  - id: postgres-connectivity
+    system: postgresql
+    alert:
+      alertname: PostgresErrorsInLogs
+      service: platform-service
+      severity: critical
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:02:05.112Z","level":"ERROR","logger_name":"org.postgresql.core.v3.ConnectionFactoryImpl","service":"platform-service","trace_id":"b2c3d4e5f6789012","message":"Connection to postgres:5432 refused. Check that the hostname and port are correct and that the postmaster is accepting TCP/IP connections."}'
+      - '{"@timestamp":"2026-07-20T20:02:07.220Z","level":"ERROR","logger_name":"com.zaxxer.hikari.pool.HikariPool","service":"platform-service","trace_id":"c3d4e5f678901234","message":"HikariPool-1 - Exception during pool initialization. org.postgresql.util.PSQLException: The connection attempt failed."}'
+      - '{"@timestamp":"2026-07-20T20:02:31.044Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"d4e5f67890123456","message":"could not open connection; nested exception is java.net.SocketTimeoutException: connect timed out to postgres/172.18.0.4:5432"}'
+    expected:
+      cause_keywords: [postgres, database, connection]
+      must_reference: [refused, "5432"]
+      root_cause: "PostgreSQL is down or unreachable at the network layer (connection refused / connect timeout on 5432); the app cannot open new DB connections. This is a database/network availability failure, not application code."
+
+  - id: db-pool-exhaustion
+    system: database-pool
+    alert:
+      alertname: HikariPoolExhaustion
+      service: platform-service
+      severity: critical
+    metrics:
+      platform-service:
+        db_pool_pending: 47
+    logs:
+      - '{"@timestamp":"2026-07-20T20:01:12.341Z","level":"ERROR","logger_name":"com.zaxxer.hikari.pool.HikariPool","service":"platform-service","trace_id":"a1b2c3d4e5f67890","message":"HikariPool-1 - Connection is not available, request timed out after 30000ms (total=20, active=20, idle=0, waiting=47)"}'
+      - '{"@timestamp":"2026-07-20T20:01:12.355Z","level":"ERROR","logger_name":"org.springframework.jdbc.support.SQLErrorCodeSQLExceptionTranslator","service":"platform-service","trace_id":"a1b2c3d4e5f67890","message":"Unable to acquire JDBC Connection; nested exception is java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms"}'
+    expected:
+      cause_keywords: [pool, hikari, connection]
+      must_reference: [waiting, "30000ms"]
+      root_cause: "HikariCP connection pool is saturated (active == max, threads waiting); the database is reachable but all connections are checked out, likely a leak, slow query, or undersized pool."
+
+  - id: redis-connection
+    system: redis
+    alert:
+      alertname: RedisErrorsInLogs
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:04:10.100Z","level":"ERROR","logger_name":"io.lettuce.core.RedisException","service":"platform-service","trace_id":"f6789012345678ab","message":"Unable to connect to Redis; nested exception is io.lettuce.core.RedisConnectionException: Unable to connect to redis:6379"}'
+      - '{"@timestamp":"2026-07-20T20:04:22.333Z","level":"ERROR","logger_name":"io.lettuce.core.protocol.CommandHandler","service":"platform-service","trace_id":"6789012345678abc","message":"io.lettuce.core.RedisCommandTimeoutException: Command timed out after 5 second(s)"}'
+    expected:
+      cause_keywords: [redis, cache, lettuce]
+      must_reference: [redis, "6379"]
+      root_cause: "The Redis cache/session store is unreachable or timing out (Lettuce cannot connect to redis:6379, command timeouts); caching, sessions and rate limits will fail."
+
+  - id: elasticsearch-degraded
+    system: elasticsearch
+    alert:
+      alertname: ElasticsearchErrorsInLogs
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:06:28.441Z","level":"ERROR","logger_name":"co.elastic.clients.elasticsearch.ElasticsearchException","service":"platform-service","trace_id":"0123456789abcdef","message":"Elasticsearch exception [type=circuit_breaking_exception, reason=[parent] Data too large, would be [1050mb], larger than limit of [1024mb]]"}'
+      - '{"@timestamp":"2026-07-20T20:07:02.777Z","level":"ERROR","logger_name":"org.elasticsearch.client.RestHighLevelClient","service":"platform-service","trace_id":"23456789abcdef01","message":"listener timeout after waiting for [30000] ms; bulk index rejected: es_rejected_execution_exception"}'
+    expected:
+      cause_keywords: [elasticsearch, search, index]
+      must_reference: [circuit_breaking_exception, rejected]
+      root_cause: "Elasticsearch is under resource pressure: the parent circuit breaker is tripping (heap too large) and bulk indexing is being rejected (thread pool/queue saturated). Search and indexing degrade."
+
+  - id: jvm-heap-oom
+    system: jvm
+    alert:
+      alertname: JvmHeapUsageHigh
+      service: platform-service
+      severity: warning
+    metrics:
+      platform-service:
+        heap_used_ratio: 0.94
+    logs:
+      - '{"@timestamp":"2026-07-20T20:10:05.001Z","level":"WARN","logger_name":"com.publishi.platform.health.JvmHealthIndicator","service":"platform-service","trace_id":"89abcdef01234567","message":"High GC pause detected: young=812ms old=2410ms; heap used=1784MB/2048MB (87%); allocation rate elevated"}'
+      - '{"@timestamp":"2026-07-20T20:10:18.440Z","level":"ERROR","logger_name":"org.springframework.boot.SpringApplication","service":"platform-service","trace_id":"9abcdef012345678","message":"Application run failed; nested exception is java.lang.OutOfMemoryError: Java heap space"}'
+    expected:
+      cause_keywords: [heap, memory, gc]
+      must_reference: [OutOfMemoryError, heap]
+      root_cause: "The JVM is out of heap memory: sustained high heap usage, long GC pauses, and an OutOfMemoryError. Likely undersized heap or a memory leak, causing latency spikes and restarts."
+
+  - id: gateway-upstream-timeout
+    system: web-server-gateway
+    alert:
+      alertname: ErrorLogSpike
+      service: api-gateway
+      severity: warning
+    metrics:
+      api-gateway:
+        error_rate: 0.18
+    logs:
+      - '{"@timestamp":"2026-07-20T20:08:01.010Z","level":"ERROR","logger_name":"org.springframework.cloud.gateway.filter.NettyRoutingFilter","service":"api-gateway","trace_id":"3456789abcdef012","message":"500 Server Error for HTTP GET \"/api/v1/content\"; nested exception is io.netty.handler.timeout.ReadTimeoutException: upstream platform-service:8080 read timed out"}'
+      - '{"@timestamp":"2026-07-20T20:08:15.220Z","level":"ERROR","logger_name":"reactor.netty.http.client.HttpClientConnect","service":"api-gateway","trace_id":"456789abcdef0123","message":"Connection prematurely closed BEFORE response; Connection reset by peer to platform-service:8080"}'
+    expected:
+      cause_keywords: [gateway, upstream, timeout]
+      must_reference: [ReadTimeoutException, platform-service]
+      root_cause: "The API gateway cannot get timely responses from its upstream (platform-service): read timeouts and connection resets at the proxy layer. Root cause is upstream slowness/crash, not the gateway itself."
+
+  - id: security-jwt-and-tenant
+    system: security-auth
+    alert:
+      alertname: SecurityAuthErrorsInLogs
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:11:22.331Z","level":"WARN","logger_name":"com.publishi.platform.security.LoginAttemptService","service":"platform-service","trace_id":"def0123456789abc","message":"Account locked after 5 failed login attempts for user=editor@example.com from ip=203.0.113.44"}'
+      - '{"@timestamp":"2026-07-20T20:11:24.010Z","level":"WARN","logger_name":"com.publishi.platform.security.LoginAttemptService","service":"platform-service","trace_id":"ef0123456789abcd","message":"Account locked after 5 failed login attempts for user=admin@example.com from ip=203.0.113.44"}'
+      - '{"@timestamp":"2026-07-20T20:11:26.900Z","level":"WARN","logger_name":"org.springframework.security.oauth2.jwt.NimbusJwtDecoder","service":"platform-service","trace_id":"f0123456789abcde","message":"Failed to authenticate since the JWT was invalid; repeated 401s from ip=203.0.113.44"}'
+    expected:
+      cause_keywords: [brute, credential, login, authentication, security]
+      must_reference: [Account locked, "203.0.113.44"]
+      root_cause: "A likely credential-stuffing / brute-force attack: repeated failed logins and lockouts across multiple accounts plus invalid-JWT 401s all from a single IP. A security anomaly, not a service fault."
+
+  - id: openai-rate-limit
+    system: external-api-openai
+    alert:
+      alertname: ExternalApiErrorsInLogs
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:13:01.100Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"23456789abcdef01","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=21s"}'
+      - '{"@timestamp":"2026-07-20T20:13:05.400Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"3456789abcdef012","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=33s"}'
+    expected:
+      cause_keywords: [openai, rate limit, "429", quota]
+      must_reference: ["429", retry-after]
+      root_cause: "The AI module is being rate-limited by OpenAI (HTTP 429, retry-after). AI-assisted features fail or slow; other modules are unaffected. External dependency throttling, not an internal bug."
+
+  - id: disk-pressure
+    system: host-disk
+    alert:
+      alertname: HostDiskSpaceLow
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:14:05.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef012345","message":"Free disk space below threshold: path=/var/lib/docker free=1.2GB total=40GB (3%); writes may fail"}'
+      - '{"@timestamp":"2026-07-20T20:14:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef0123456","message":"could not write to file: No space left on device"}'
+    expected:
+      cause_keywords: [disk, space, filesystem, storage]
+      must_reference: ["No space left on device", "3%"]
+      root_cause: "The host filesystem is nearly full (3% free); writes are failing with 'No space left on device'. Root cause is host disk exhaustion affecting all write-heavy services."
+
+  # --- Adversarial / harder cases (no obvious keyword; tests real reasoning) ---
+
+  - id: ambiguous-cascade
+    system: database-pool
+    alert:
+      alertname: HighErrorRate
+      service: platform-service
+      severity: warning
+    metrics:
+      platform-service:
+        error_rate: 0.22
+        db_pool_pending: 31
+        latency_p99: 8.4
+    logs:
+      - '{"@timestamp":"2026-07-20T20:20:00.100Z","level":"ERROR","logger_name":"c.p.content.ContentService","service":"platform-service","trace_id":"aa11bb22cc33dd44","message":"Request failed processing content publish"}'
+      - '{"@timestamp":"2026-07-20T20:20:01.200Z","level":"WARN","logger_name":"com.zaxxer.hikari.pool.HikariPool","service":"platform-service","trace_id":"aa11bb22cc33dd45","message":"HikariPool-1 - Timeout failure stats (total=20, active=20, idle=0, waiting=31)"}'
+      - '{"@timestamp":"2026-07-20T20:20:02.300Z","level":"ERROR","logger_name":"c.p.content.ContentService","service":"platform-service","trace_id":"aa11bb22cc33dd46","message":"500 returned to gateway for POST /api/v1/content"}'
+    expected:
+      cause_keywords: [pool, connection, database, hikari]
+      must_reference: [waiting, active]
+      root_cause: "The 5xx spike is a symptom; the real cause is DB pool saturation (active==max, 31 waiting, high p99). The model should look past the generic 5xx and identify the pool as the driver."
+
+  - id: no-signal-control
+    system: insufficient-data
+    alert:
+      alertname: HighErrorRate
+      service: platform-service
+      severity: warning
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-20T20:30:00.000Z","level":"WARN","logger_name":"c.p.content.ContentService","service":"platform-service","trace_id":"ffee0011deadbeef","message":"Retrying publish once"}'
+    expected:
+      cause_keywords: [insufficient, unclear, unknown, low confidence, more data]
+      must_reference: []
+      root_cause: "There is not enough evidence to determine a root cause (a single benign WARN, no error signal, no metrics). The correct behavior is to say data is insufficient and report LOW confidence rather than inventing a cause."

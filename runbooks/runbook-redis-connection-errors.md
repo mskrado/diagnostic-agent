@@ -19,6 +19,13 @@ limits, and module caches may fail; platform-service may return 5xx.
 ## Blast radius
 `auth` (sessions), any module using `@Cacheable`, notification throttles.
 
+## Example log lines (synthetic)
+```json
+{"@timestamp":"2026-07-20T20:04:10.100Z","level":"ERROR","logger_name":"io.lettuce.core.RedisException","service":"platform-service","trace_id":"f6789012345678abcdef0123456789ab","message":"Unable to connect to Redis; nested exception is io.lettuce.core.RedisConnectionException: Unable to connect to redis:6379"}
+{"@timestamp":"2026-07-20T20:04:22.333Z","level":"ERROR","logger_name":"io.lettuce.core.protocol.CommandHandler","service":"platform-service","trace_id":"6789012345678abcdef0123456789abc","message":"io.lettuce.core.RedisCommandTimeoutException: Command timed out after 5 second(s)"}
+{"@timestamp":"2026-07-20T20:04:40.512Z","level":"ERROR","logger_name":"org.springframework.data.redis.RedisConnectionFailureException","service":"platform-service","trace_id":"789012345678abcdef0123456789abcd","message":"Unable to connect to Redis; nested exception is io.lettuce.core.RedisConnectionException: NOAUTH Authentication required."}
+```
+
 ## Hypotheses-only
 This runbook supports surfacing hypotheses. Do NOT auto-remediate; a human
 confirms and acts.

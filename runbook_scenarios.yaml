@@ -159,3 +159,48 @@ scenarios:
     rag_query: ContainerRestartLoop container restart crash loop OOM
     rag_must_contain:
       - restart
+
+  - id: postgres-connectivity
+    runbook: runbook-postgres-connectivity.md
+    description: PostgreSQL unreachable / connection refused (distinct from pool)
+    labels:
+      alertname: PostgresErrorsInLogs
+      service: platform-service
+      severity: critical
+    annotations:
+      summary: Synthetic PostgresConnectivity for runbook E2E
+    rag_query: PostgresConnectivity postgres connection refused PSQLException database down
+    rag_must_contain:
+      - postgres
+      - refused
+
+  - id: auth-security-anomaly
+    runbook: runbook-auth-security-anomaly.md
+    description: Authentication / tenant-isolation security signals in logs
+    labels:
+      alertname: SecurityAuthErrorsInLogs
+      service: platform-service
+      severity: warning
+      module: auth
+    annotations:
+      summary: Synthetic SecurityAuthAnomaly for runbook E2E
+    rag_query: SecurityAuthAnomaly jwt authentication failed cross-tenant isolation brute force
+    rag_must_contain:
+      - jwt
+      - tenant
+      - security
+
+  - id: gateway-upstream-errors
+    runbook: runbook-gateway-upstream-errors.md
+    description: API gateway 5xx / upstream timeout at the proxy layer
+    labels:
+      alertname: ErrorLogSpike
+      service: api-gateway
+      severity: warning
+    annotations:
+      summary: Synthetic GatewayUpstreamErrors for runbook E2E
+    rag_query: GatewayUpstreamErrors api-gateway 502 read timeout upstream connection reset
+    rag_must_contain:
+      - gateway
+      - timeout
+      - upstream

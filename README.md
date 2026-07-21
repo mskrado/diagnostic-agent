@@ -551,6 +551,57 @@ AGENT_E2E_URL=http://localhost:8001 python -m pytest tests/test_runbook_scenario
 Add a scenario when authoring a new runbook: copy an entry in `runbook_scenarios.yaml`
 with matching `alertname` / `service` labels from `docs/observability/ALERTING_STRATEGY.md`.
 
+## Blind LLM eval (RAG-off)
+
+Measures how well the LLM identifies a root cause **from logs alone, with no
+runbook/RAG context** — i.e. what the model can do without the local knowledge
+base. Ground truth lives in `eval/blind_eval_dataset.yaml` (independent of the
+runbooks, so no answer leaks). Full guide + **CLI parameter reference**:
+**`eval/README.md`**.
+
+**Where the logs come from / how they are injected:**
+
+| Path | Log source | Injection point |
+|---|---|---|
+| Production | app stdout (logback JSON) | Promtail → Loki (agent *pulls* in `retrieve`) |
+| Eval **offline** (default) | `eval/blind_eval_dataset.yaml` | straight into the prompt; RAG context hard-set to `none` |
+| Eval **live** (`--live-url`) | `eval/blind_eval_dataset.yaml` | Loki push API → agent *pulls* (start agent with `AGENT_RAG_ENABLED=false`) |
+
+**CLI flags** (`python eval/run_blind_eval.py -h`):
+
+| Flag | Description |
+|---|---|
+| `--dataset PATH` | Case YAML (default `eval/blind_eval_dataset.yaml`) |
+| `--out DIR` | Result JSON directory (default `eval/results/`) |
+| `--only IDS` | Comma-separated case ids (e.g. `jvm-heap-oom`) |
+| `--limit N` | First N cases after `--only` (`0` = all) |
+| `--judge` | Extra LLM grades primary hypothesis vs ground-truth root cause |
+| `--live-url URL` | Live mode: `POST {URL}/alert` (e.g. `http://localhost:8001`) |
+| `--loki-url URL` | Live mode: push case logs to Loki first (e.g. `http://localhost:3100`) |
+
+```bash
+cd diagnostic-agent
+
+# Offline (no stack needed; uses the configured AGENT_CHAT_* provider)
+python eval/run_blind_eval.py
+python eval/run_blind_eval.py --judge                       # + 0-5 LLM-as-judge score
+python eval/run_blind_eval.py --only jvm-heap-oom           # single case
+python eval/run_blind_eval.py --only redis-connection --judge
+
+# Live full pipeline: push logs into Loki, fire /alert, read the diagnosis
+DIAGNOSTIC_AGENT_RAG_ENABLED=false docker compose -f docker-compose.yml \
+  -f docker-compose.observability.yml --profile diagnostic-agent up -d --force-recreate diagnostic-agent
+python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
+python eval/run_blind_eval.py --only jvm-heap-oom \
+  --live-url http://localhost:8001 --loki-url http://localhost:3100 --judge
+```
+
+Reports `identified_accuracy`, `mean_keyword_recall`, per-case `grounded`
+(anti-hallucination) and `confidence_note` (calibration), plus judge scores with
+`--judge`. Results are written to `eval/results/` (gitignored). Run RAG-off vs
+RAG-on to quantify how much the runbooks help. See `eval/README.md` for scoring
+details and every parameter with examples.
+
 ## Try it without an alert
 
 **Agent only (diagnostic summary email — no Alertmanager alert email):**
