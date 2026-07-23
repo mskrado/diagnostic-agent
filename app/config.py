@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     embed_provider: str = "ollama"
     embed_model: str = "nomic-embed-text"
     llm_temperature: float = 0.1
+    # Max completion tokens for chat/structured diagnosis. Nova Converse ToolUse
+    # fails with ModelErrorException when the Diagnosis JSON is truncated.
+    chat_max_tokens: int = 8192
     # JSON passthrough for provider-specific kwargs (base_url, region_name, …).
     chat_model_kwargs: str = "{}"
     embed_model_kwargs: str = "{}"

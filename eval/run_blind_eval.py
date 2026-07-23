@@ -219,10 +219,9 @@ def build_prompt(case: dict, rag_context: str = "") -> tuple[str, str]:
 # model runners
 # --------------------------------------------------------------------------
 def make_model():
-    from app.graph.schema import Diagnosis
-    from app.llm import get_chat_model
+    from app.llm import get_structured_diagnosis_llm
 
-    return get_chat_model().with_structured_output(Diagnosis, include_raw=True)
+    return get_structured_diagnosis_llm()
 
 
 def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
@@ -230,12 +229,15 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from app.config import settings
+    from app.llm import invoke_structured_diagnosis
     from app.llm_usage import extract_token_usage
 
     formatted = format_logs(case.get("logs", []))
     rag_context = retrieve_rag_context(case, formatted) if include_rag else ""
     system, human = build_prompt(case, rag_context=rag_context)
-    result = model.invoke([SystemMessage(content=system), HumanMessage(content=human)])
+    result = invoke_structured_diagnosis(
+        model, [SystemMessage(content=system), HumanMessage(content=human)]
+    )
     parsed = result.get("parsed") if isinstance(result, dict) else None
     raw_msg = result.get("raw") if isinstance(result, dict) else None
     raw = getattr(raw_msg, "content", "") or ""
