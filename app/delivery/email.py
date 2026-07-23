@@ -85,6 +85,18 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
                 conf = item.get("confidence", "?")
                 secondary.append(f"  - {item['cause']} ({conf}%)")
 
+    categories = []
+    if isinstance(diagnosis, dict):
+        for item in diagnosis.get("issue_categories") or []:
+            if isinstance(item, dict) and item.get("cause"):
+                label = item.get("category") or "uncategorized"
+                conf = item.get("confidence", "?")
+                line = f"  - [{label}] {item['cause']} ({conf}%)"
+                nxt = item.get("suggested_next_step")
+                if nxt:
+                    line += f"\n      next: {nxt}"
+                categories.append(line)
+
     blast = ", ".join(report.get("blast_radius", []) or []) or "none identified"
     steps = report.get("diagnosis", {}).get("suggested_next_steps", []) if isinstance(
         diagnosis, dict
@@ -111,6 +123,8 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
         "",
         hypothesis_block,
     ]
+    if categories:
+        plain_parts.extend(["", "Issue categories (per distinct problem):", *categories])
     if secondary:
         plain_parts.extend(["", "Secondary hypotheses:", *secondary])
     plain_parts.extend(
@@ -143,6 +157,16 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
         f"<p><b>Severity:</b> {severity}</p>"
         f"<p><b>Alert summary:</b> {alert_summary or '(none)'}</p>"
         f"<p>{hypothesis_block.replace(chr(10), '<br/>')}</p>"
+        + (
+            "<h3>Issue categories (per distinct problem)</h3><ul>"
+            + "".join(
+                f"<li>{c.strip().lstrip('- ').replace(chr(10), '<br/>')}</li>"
+                for c in categories
+            )
+            + "</ul>"
+            if categories
+            else ""
+        )
         + (
             "<h3>Secondary hypotheses</h3><ul>"
             + "".join(f"<li>{s.strip()[2:]}</li>" for s in secondary)

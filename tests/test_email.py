@@ -70,6 +70,48 @@ def test_format_diagnosis_email_includes_hypothesis():
     assert "OpenAIHealthIndicator" in html
 
 
+def test_format_diagnosis_email_renders_issue_categories():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "critical",
+        "blast_radius": ["postgres", "redis"],
+        "diagnosis": {
+            "issue_categories": [
+                {
+                    "category": "database",
+                    "cause": "Postgres connection refused",
+                    "confidence": 85,
+                    "evidence": "Connection to postgres:5432 refused",
+                    "suggested_next_step": "Check postgres container health",
+                },
+                {
+                    "category": "cache",
+                    "cause": "Redis command timeout",
+                    "confidence": 60,
+                    "evidence": "Command timed out after 5 second(s)",
+                    "suggested_next_step": "Check redis latency",
+                },
+            ],
+            "primary_hypothesis": {
+                "cause": "Postgres connection refused",
+                "confidence": 85,
+                "evidence": "Connection to postgres:5432 refused",
+            },
+            "secondary_hypotheses": [{"cause": "Redis command timeout", "confidence": 60}],
+            "suggested_next_steps": ["Check postgres", "Check redis"],
+        },
+        "evidence": {"rag_used": False, "metrics": {}, "error_log_sample": []},
+    }
+    _, plain, html = format_diagnosis_email(report)
+    assert "Issue categories" in plain
+    assert "[database] Postgres connection refused (85%)" in plain
+    assert "[cache] Redis command timeout (60%)" in plain
+    assert "next: Check postgres container health" in plain
+    assert "Issue categories" in html
+    assert "Postgres connection refused" in html
+
+
 def test_format_diagnosis_email_empty_logs():
     report = {
         "service": "platform-service",

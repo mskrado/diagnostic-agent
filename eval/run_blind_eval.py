@@ -357,6 +357,13 @@ def _text_pool(diag: dict) -> str:
     parts = [primary.get("cause", ""), primary.get("evidence", "")]
     for h in diag.get("secondary_hypotheses", []) or []:
         parts.append(h.get("cause", ""))
+    # Per-category assessments (multi-issue diagnosis) also count toward recall.
+    for c in diag.get("issue_categories", []) or []:
+        if isinstance(c, dict):
+            parts.append(c.get("category", ""))
+            parts.append(c.get("cause", ""))
+            parts.append(c.get("evidence", ""))
+            parts.append(c.get("suggested_next_step", ""))
     parts.append(diag.get("blast_radius_assessment", ""))
     parts.extend(diag.get("suggested_next_steps", []) or [])
     return " ".join(parts).lower()
