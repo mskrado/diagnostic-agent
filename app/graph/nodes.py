@@ -143,12 +143,19 @@ class DiagnosticNodes:
 
     # ---- rag_lookup ----------------------------------------------------
     def rag_lookup(self, state: DiagnosticState) -> DiagnosticState:
-        log_excerpt = " ".join(state.get("loki_logs", [])[:3])
-        query = (
-            f"{state.get('alert_type', '')} {state.get('service', '')} "
-            f"{state.get('module_hint', '')} {log_excerpt}"
-        ).strip()
-        context = self.rag.query(query)
+        # Retrieve per distinct error family across the *full* log sample so
+        # mixed incidents pull redis/jvm/postgres runbooks together — not only
+        # whatever family appears in logs[:3].
+        from ..rag.queries import build_rag_queries
+
+        logs = list(state.get("loki_logs") or [])
+        queries = build_rag_queries(
+            alert_type=state.get("alert_type", "") or "",
+            service=state.get("service", "") or "",
+            module_hint=state.get("module_hint", "") or "",
+            log_lines=logs,
+        )
+        context = self.rag.query_many(queries)
         return {**state, "rag_context": context}
 
     # ---- correlate -----------------------------------------------------

@@ -158,14 +158,17 @@ def format_logs(lines: list[str]) -> list[str]:
     return LokiClient.format_log_entries(pairs)
 
 
-def rag_query_for_case(case: dict, logs: list[str]) -> str:
-    """Same query shape as DiagnosticNodes.rag_lookup."""
+def rag_queries_for_case(case: dict, logs: list[str]) -> list[str]:
+    """Same multi-family RAG queries as DiagnosticNodes.rag_lookup."""
+    from app.rag.queries import build_rag_queries
+
     alert = case.get("alert", {})
-    log_excerpt = " ".join(logs[:3])
-    return (
-        f"{alert.get('alertname', '')} {alert.get('service', '')} "
-        f"{alert.get('module', '')} {log_excerpt}"
-    ).strip()
+    return build_rag_queries(
+        alert_type=alert.get("alertname", "") or "",
+        service=alert.get("service", "") or "",
+        module_hint=alert.get("module", "") or "",
+        log_lines=logs,
+    )
 
 
 def get_rag_store():
@@ -182,7 +185,7 @@ def retrieve_rag_context(case: dict, logs: list[str]) -> str:
     store = get_rag_store()
     if not store.available:
         return ""
-    return store.query(rag_query_for_case(case, logs)) or ""
+    return store.query_many(rag_queries_for_case(case, logs)) or ""
 
 
 def build_prompt(case: dict, rag_context: str = "") -> tuple[str, str]:

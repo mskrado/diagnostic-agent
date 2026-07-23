@@ -40,7 +40,9 @@ class Settings(BaseSettings):
     rag_enabled: bool = True
     runbooks_path: str = str(_BASE_DIR / "runbooks")
     chroma_path: str = str(_BASE_DIR / "chroma_db")
-    rag_top_k: int = 3
+    # Per-family retrieval + overall cap for mixed-error log samples.
+    rag_top_k: int = 2
+    rag_max_chunks: int = 8
 
     # --- Retrieval tuning ---
     loki_lookback_minutes: int = 15

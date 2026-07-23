@@ -145,7 +145,10 @@ Runbooks live in `runbooks/` (see `runbooks/README.md`). At startup the agent:
 
 - loads all `**/*.md` files;
 - splits with **chunk_size=800**, **chunk_overlap=80**;
-- retrieves **top_k=3** chunks per alert (`AGENT_RAG_TOP_K` if exposed).
+- retrieves **up to ``AGENT_RAG_TOP_K`` chunks per distinct error family** in the
+  log sample (default 2), merged/deduped to at most ``AGENT_RAG_MAX_CHUNKS``
+  (default 8). Mixed samples (postgres + redis + JVM in one window) therefore
+  pull each family's runbook — not only whatever appears in ``logs[:3]``.
 
 Restart the container after adding runbooks so Chroma rebuilds. Quality checks:
 `pytest tests/test_rag_eval.py`.
