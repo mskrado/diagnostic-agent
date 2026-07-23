@@ -63,7 +63,7 @@ def test_format_diagnosis_email_includes_hypothesis():
     assert "Diagnosis: bedrock / amazon.nova-micro-v1:0" in plain
     assert "Embeddings: bedrock / amazon.titan-embed-text-v2:0" in plain
     assert "Confidence note: high" in plain
-    assert "<h3>Models</h3>" in html
+    assert "Models" in html
     assert "amazon.nova-micro-v1:0" in html
     assert "Log source:" in plain
     assert "http://loki:3100" in plain
@@ -127,6 +127,54 @@ def test_format_diagnosis_email_renders_issue_categories():
     assert "Connection to postgres:5432 refused" in html
 
 
+def test_format_diagnosis_email_renders_tools_and_fixes():
+    report = {
+        "service": "platform-service",
+        "alert_type": "PostgresErrorsInLogs",
+        "severity": "warning",
+        "blast_radius": ["postgres"],
+        "diagnosis": {
+            "issue_categories": [
+                {
+                    "category": "database",
+                    "cause": "Postgres connection refused",
+                    "confidence": 90,
+                    "evidence": "Connection refused",
+                    "suggested_next_step": "Check postgres container",
+                    "tool_run_examples": ["docker compose ps postgres"],
+                    "fix_suggestions": ["Restart postgres if exited (brief downtime)."],
+                }
+            ],
+            "primary_hypothesis": {
+                "cause": "Postgres connection refused",
+                "confidence": 90,
+                "evidence": "Connection refused",
+            },
+            "suggested_next_steps": ["Check postgres container"],
+            "tool_run_examples": [
+                "docker logs publishi-postgres --tail 100",
+                "curl -sf http://localhost:8080/actuator/health",
+            ],
+            "fix_suggestions": [
+                "Verify SPRING_DATASOURCE_PASSWORD matches POSTGRES_PASSWORD.",
+                "Restart postgres if the container is exited (brief downtime).",
+            ],
+            "confidence_note": "high",
+        },
+        "evidence": {"rag_used": False, "metrics": {}, "error_log_sample": []},
+    }
+    _, plain, html = format_diagnosis_email(report)
+    # With issue_categories present, tools/fixes live inside each category card
+    # and the redundant global sections are dropped.
+    assert "tool runs:" in plain
+    assert "$ docker compose ps postgres" in plain
+    assert "fixes:" in plain
+    assert "Restart postgres if exited (brief downtime)." in plain
+    assert "docker compose ps postgres" in html
+    assert "Restart postgres if exited (brief downtime)." in html
+    assert "no auto-remediation" in plain
+
+
 def test_format_diagnosis_email_includes_judge_when_present():
     report = {
         "service": "platform-service",
@@ -159,7 +207,7 @@ def test_format_diagnosis_email_includes_judge_when_present():
     assert "Correct: yes" in plain
     assert "Found postgres and redis in issue_categories" in plain
     assert "Judge: bedrock / amazon.nova-micro-v1:0" in plain
-    assert "<h3>Judge</h3>" in html
+    assert "Judge" in html
     assert "4/5" in html
     assert "Found postgres and redis" in html
 

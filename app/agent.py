@@ -18,8 +18,7 @@ from .delivery.email import deliver_email
 from .dependency_map import get_dependency_map
 from .graph.build import build_diagnostic_graph
 from .graph.nodes import DiagnosticNodes
-from .graph.schema import Diagnosis
-from .llm import get_chat_model
+from .llm import get_structured_diagnosis_llm
 from .rag.store import build_rag_store
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ class DiagnosticAgent:
         self.grafana = GrafanaClient(settings.grafana_url, settings.grafana_token)
         self.dep_map = get_dependency_map(settings.service_map_path)
         self.rag = build_rag_store()
-        self.llm = get_chat_model().with_structured_output(Diagnosis, include_raw=True)
+        self.llm = get_structured_diagnosis_llm()
         self.nodes = DiagnosticNodes(
             self.prom, self.loki, self.grafana, self.dep_map, self.rag, self.llm
         )

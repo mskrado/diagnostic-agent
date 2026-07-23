@@ -19,6 +19,7 @@ from ..clients.loki import LokiClient
 from ..clients.prometheus import PrometheusClient
 from ..config import settings
 from ..dependency_map import DependencyMap
+from ..llm import content_to_text, invoke_structured_diagnosis
 from ..llm_usage import extract_token_usage
 from ..rag.store import RagStore
 from .prompts import SYSTEM_PROMPT
@@ -183,15 +184,16 @@ class DiagnosticNodes:
         raw = ""
         token_usage = extract_token_usage(None)
         try:
-            result = self.llm.invoke(
+            result = invoke_structured_diagnosis(
+                self.llm,
                 [
                     SystemMessage(content=SYSTEM_PROMPT),
                     HumanMessage(content=user_content),
-                ]
+                ],
             )
             parsed = result.get("parsed") if isinstance(result, dict) else None
             raw_msg = result.get("raw") if isinstance(result, dict) else None
-            raw = getattr(raw_msg, "content", "") or ""
+            raw = content_to_text(getattr(raw_msg, "content", ""))
             token_usage = extract_token_usage(raw_msg)
             if parsed is not None:
                 hypotheses = parsed.model_dump()
