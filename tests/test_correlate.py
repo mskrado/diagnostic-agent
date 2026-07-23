@@ -75,6 +75,7 @@ def test_correlate_structured_output_success():
     assert exchange["chat_model"]
     assert exchange["embed_provider"]
     assert exchange["embed_model"]
+    assert reported["report"]["models"]["chat_model"] == exchange["chat_model"]
 
 
 def test_correlate_structured_output_parse_failure():

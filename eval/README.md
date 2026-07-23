@@ -101,7 +101,7 @@ python eval/run_blind_eval.py -h
 | `--out DIR` | dir; default `eval/results/` | Where to write `blind-eval-<UTC-timestamp>.json` (summary + per-case diagnosis + scores). Created if missing. Gitignored. |
 | `--only IDS` | string; default *all cases* | Comma-separated case `id` values from the dataset. Filters before `--limit`. Example ids: `jvm-heap-oom`, `postgres-connectivity`, `redis-connection`. |
 | `--limit N` | int; default `0` (no limit) | After `--only` filtering, keep only the first **N** cases. Handy for a quick smoke of the harness. |
-| `--judge` | flag; default off | Extra LLM call per case that grades the primary hypothesis against `expected.root_cause`. Adds `judge_score` (0–5), `judge_correct`, `judge_reason`, and summary `mean_judge_score` / `judge_correct_rate`. Costs ~1× more LLM calls. |
+| `--judge` | flag; default off | Extra LLM call per case that grades the **full** diagnosis JSON (`issue_categories`, primary/secondary, next steps, etc.) against known root cause(s). Adds `judge_score` (0–5), `judge_correct`, `judge_reason`, and summary `mean_judge_score` / `judge_correct_rate`. Costs ~1× more LLM calls. |
 | `--live-url URL` | string; default empty (= offline) | Base URL of a running diagnostic-agent. Enables **live** mode: `POST {URL}/alert` with the case’s alert labels and score the returned `diagnosis`. Does **not** inject logs by itself. Example: `http://localhost:8001`. |
 | `--loki-url URL` | string; default empty | Loki base URL used **only in live mode** to inject the case’s `logs:` via `POST {URL}/loki/api/v1/push` before `/alert`. Example: `http://localhost:3100`. Ignored offline. If you set `--live-url` without `--loki-url`, no logs are pushed (agent sees whatever is already in Loki). |
 | `--merge` | flag; default off | After `--only` / `--limit`, **combine** the remaining cases into **one** request: logs are round-robin interleaved then shuffled (`--merge-seed`), metrics deep-merged, alert becomes generic `HighErrorRate`. Scores per-system hit rate (a cause counts if its keywords appear in primary **or** secondary). Needs ≥2 cases. |
@@ -140,6 +140,10 @@ python eval/run_blind_eval.py --only postgres-connectivity,redis-connection,jvm-
 ```
 
 **`--judge` — keyword scores + LLM-as-judge:**
+
+Grades the **entire** diagnosis JSON (not primary alone). Causes listed only under
+`issue_categories` still count. On `--merge`, required causes are listed per source
+case; `insufficient-data` controls are excluded from the must-hit checklist.
 
 ```bash
 python eval/run_blind_eval.py --judge

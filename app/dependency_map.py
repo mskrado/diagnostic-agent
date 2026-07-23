@@ -52,6 +52,22 @@ class DependencyMap:
     def module_dependencies(self, module: str) -> list[str]:
         return list(self._module_deps.get(module, []))
 
+    def log_services(self, service: str) -> list[str]:
+        """Loki ``service=`` labels that hold lines for this alert target.
+
+        Backing deps and logical targets (postgres, security, …) emit through
+        platform-service / api-gateway; defaults to ``[service]`` when unset.
+        """
+        explicit = self._services.get(service, {}).get("log_services")
+        if explicit:
+            return list(explicit)
+        return [service] if service else []
+
+    def log_selector(self, service: str) -> str | None:
+        """Optional full Loki stream selector override (e.g. Faro ``{app=}``)."""
+        sel = self._services.get(service, {}).get("log_selector")
+        return str(sel).strip() if sel else None
+
     def resolve(self, raw: str) -> str:
         """Best-effort map an alert label (job/service) to a known service.
 

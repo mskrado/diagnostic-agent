@@ -461,40 +461,83 @@ def score_merged_case(merged: dict, diag: dict) -> dict:
     }
 
 
+def _diagnosis_payload_for_judge(diag: dict) -> dict:
+    """Full diagnosis JSON for the judge (drop internal eval-only keys)."""
+    return {
+        k: v
+        for k, v in (diag or {}).items()
+        if not str(k).startswith("_")
+    }
+
+
+def _known_causes_checklist(case: dict) -> tuple[str, list[str]]:
+    """Structured known-cause list; skip insufficient-data controls."""
+    sources = case.get("source_cases") or []
+    if sources:
+        lines: list[str] = []
+        required_ids: list[str] = []
+        controls: list[str] = []
+        for src in sources:
+            sid = src.get("id") or "?"
+            system = src.get("system") or "?"
+            root = (src.get("expected") or {}).get("root_cause", "")
+            if system == "insufficient-data":
+                controls.append(f"- id={sid} (CONTROL): {root}")
+                continue
+            required_ids.append(sid)
+            lines.append(f"- id={sid} system={system}: {root}")
+        body = "Required concurrent root causes (credit if found anywhere in MODEL diagnosis):\n"
+        body += "\n".join(lines) if lines else "(none)"
+        if controls:
+            body += (
+                "\n\nControl cases (do NOT require a matching hypothesis; "
+                "penalize only if the model invents a confident cause with no evidence):\n"
+            )
+            body += "\n".join(controls)
+        return body, required_ids
+
+    root = (case.get("expected") or {}).get("root_cause", "")
+    return f"KNOWN root cause:\n{root}", []
+
+
+def build_judge_prompt(case: dict, diag: dict) -> str:
+    """Prompt that grades the FULL model diagnosis, not only primary/secondary."""
+    known_block, _required = _known_causes_checklist(case)
+    model_json = json.dumps(_diagnosis_payload_for_judge(diag), indent=2, default=str)
+    if case.get("merged_from"):
+        return (
+            "You are grading a diagnostic model on a MIXED multi-failure incident.\n"
+            "You MUST review the ENTIRE MODEL diagnosis JSON below — including "
+            "issue_categories (category, cause, confidence, evidence, "
+            "suggested_next_step), primary_hypothesis, secondary_hypotheses, "
+            "blast_radius_assessment, and suggested_next_steps. Do NOT grade from "
+            "primary_hypothesis alone; a cause listed only under issue_categories "
+            "still counts as identified.\n\n"
+            "Score 0-5 (5 = essentially all required concurrent causes appear "
+            "somewhere in the diagnosis with sound grounding; 0 = wrong or ignores "
+            "the mix). Set correct=true only if most required causes are identified "
+            "somewhere in that full JSON.\n"
+            "In your reason, name which required ids were found vs missed; do not "
+            "claim a miss for a cause that appears in issue_categories.\n\n"
+            f"{known_block}\n\n"
+            f"MODEL diagnosis (full JSON):\n{model_json}\n"
+        )
+    return (
+        "You are grading a diagnostic model. Review the ENTIRE MODEL diagnosis JSON "
+        "(issue_categories if present, primary_hypothesis, secondary_hypotheses, "
+        "evidence, suggested_next_steps) against the known root cause. Score 0-5 "
+        "(5 = correctly identifies the true root cause with sound reasoning; "
+        "0 = wrong or hallucinated). Set correct=true only if the diagnosis "
+        "matches the true root cause (primary or a clear issue_categories entry).\n\n"
+        f"{known_block}\n\n"
+        f"MODEL diagnosis (full JSON):\n{model_json}\n"
+    )
+
+
 def judge_case(judge_model, case: dict, diag: dict) -> dict:
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    primary = diag.get("primary_hypothesis", {}) or {}
-    secondaries = diag.get("secondary_hypotheses") or []
-    sec_text = "; ".join(
-        (h.get("cause") or "") for h in secondaries if isinstance(h, dict)
-    )
-    if case.get("merged_from"):
-        known = (case.get("expected") or {}).get("root_cause", "")
-        verdict_prompt = (
-            "You are grading a diagnostic model on a MIXED multi-failure incident. "
-            "KNOWN root causes lists several concurrent failures that appear together "
-            "in the logs. Score 0-5 (5 = surfaces essentially all known concurrent "
-            "causes across primary and secondary hypotheses; 0 = wrong or ignores "
-            "the mix). Set correct=true only if most known causes are identified "
-            "somewhere in the diagnosis (primary or secondary).\n\n"
-            f"KNOWN concurrent root causes: {known}\n\n"
-            f"MODEL primary cause: {primary.get('cause', '')}\n"
-            f"MODEL evidence: {primary.get('evidence', '')}\n"
-            f"MODEL secondary causes: {sec_text}\n"
-            f"MODEL confidence_note: {diag.get('confidence_note')}"
-        )
-    else:
-        verdict_prompt = (
-            "You are grading a diagnostic model. Compare the model's PRIMARY hypothesis "
-            "to the KNOWN root cause. Score 0-5 (5 = correctly identifies the true root "
-            "cause with sound reasoning; 0 = wrong or hallucinated). Set correct=true "
-            "only if the primary hypothesis matches the true root cause.\n\n"
-            f"KNOWN root cause: {case.get('expected', {}).get('root_cause', '')}\n\n"
-            f"MODEL primary cause: {primary.get('cause', '')}\n"
-            f"MODEL evidence: {primary.get('evidence', '')}\n"
-            f"MODEL confidence_note: {diag.get('confidence_note')}"
-        )
+    verdict_prompt = build_judge_prompt(case, diag)
     try:
         v = judge_model.invoke(
             [
