@@ -60,6 +60,23 @@ def test_get_chat_model_bedrock_structured_forces_greedy_and_max_tokens(monkeypa
     assert init.call_args.kwargs["region_name"] == "us-east-1"
 
 
+def test_content_to_text_handles_bedrock_blocks_and_none():
+    assert llm_mod.content_to_text("plain") == "plain"
+    assert llm_mod.content_to_text(None) == ""
+    # Block without a text key must not raise (regression: NoneType join).
+    assert (
+        llm_mod.content_to_text(
+            [
+                {"type": "reasoning"},
+                {"type": "text", "text": "hello"},
+                None,
+                "world",
+            ]
+        )
+        == "hello\nworld"
+    )
+
+
 def test_is_tooluse_model_error():
     assert llm_mod.is_tooluse_model_error(
         Exception(

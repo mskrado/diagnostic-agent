@@ -229,7 +229,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from app.config import settings
-    from app.llm import invoke_structured_diagnosis
+    from app.llm import content_to_text, invoke_structured_diagnosis
     from app.llm_usage import extract_token_usage
 
     formatted = format_logs(case.get("logs", []))
@@ -240,7 +240,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     )
     parsed = result.get("parsed") if isinstance(result, dict) else None
     raw_msg = result.get("raw") if isinstance(result, dict) else None
-    raw = getattr(raw_msg, "content", "") or ""
+    raw = content_to_text(getattr(raw_msg, "content", ""))
     token_usage = extract_token_usage(raw_msg)
     exchange = {
         "system_prompt": system,

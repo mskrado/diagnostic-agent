@@ -105,6 +105,30 @@ def get_embeddings():
     )
 
 
+def content_to_text(content: Any) -> str:
+    """Flatten a chat message ``content`` (str or Bedrock block list) to text.
+
+    Bedrock Converse can return a list of content blocks, some of which
+    (reasoning, tool_use) have no ``text`` key. Coerce every element to a
+    string so ``"\\n".join`` never sees ``None``.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if text:
+                    parts.append(str(text))
+            elif block is not None:
+                parts.append(str(block))
+        return "\n".join(parts)
+    return str(content)
+
+
 def is_tooluse_model_error(exc: BaseException) -> bool:
     """True when Bedrock Nova rejects / truncates a ToolUse structured call."""
     text = f"{type(exc).__name__}: {exc}".lower()
@@ -141,18 +165,9 @@ def _diagnosis_json_fallback(messages: list) -> dict:
         )
     ]
     raw_msg = base.invoke(fallback_messages)
-    content = getattr(raw_msg, "content", "") or ""
-    if isinstance(content, list):
-        # Bedrock sometimes returns content blocks
-        parts = []
-        for block in content:
-            if isinstance(block, dict) and block.get("text"):
-                parts.append(block["text"])
-            elif isinstance(block, str):
-                parts.append(block)
-        content = "\n".join(parts)
+    content = content_to_text(getattr(raw_msg, "content", ""))
     try:
-        payload = json.loads(_extract_json_object(str(content)))
+        payload = json.loads(_extract_json_object(content))
         parsed = Diagnosis.model_validate(payload)
         return {"parsed": parsed, "raw": raw_msg, "parsing_error": None}
     except Exception as parse_exc:  # noqa: BLE001
