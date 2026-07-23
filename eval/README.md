@@ -336,6 +336,9 @@ from `false` to `true`).
 
 ## Metrics reported
 
+- `models` — chat/embed provider + model ids used for diagnosis (and `judge`
+  when `--judge` is on). Live diagnosis models come from the agent `/health`
+  (or `llm_exchange`); offline/judge use host `AGENT_*` settings.
 - `identified_accuracy` — primary hypothesis named the right system/cause
   (for `--merge`: all source systems hit in the diagnosis text pool).
 - `mean_systems_hit_rate` — with `--merge`: fraction of concurrent causes found.

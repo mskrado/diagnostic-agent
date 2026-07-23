@@ -71,6 +71,10 @@ def test_correlate_structured_output_success():
     assert exchange["rag_context"] == "pool exhaustion runbook"
     assert exchange["token_usage"]["total_tokens"] == 133
     assert exchange["user_prompt"] == out["llm_user_prompt"]
+    assert exchange["chat_provider"]
+    assert exchange["chat_model"]
+    assert exchange["embed_provider"]
+    assert exchange["embed_model"]
 
 
 def test_correlate_structured_output_parse_failure():

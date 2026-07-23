@@ -229,6 +229,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     """Return {diagnosis, llm_exchange} for offline scoring + prompt/token audit."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    from app.config import settings
     from app.llm_usage import extract_token_usage
 
     formatted = format_logs(case.get("logs", []))
@@ -246,6 +247,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
         "rag_used": bool(rag_context),
         "token_usage": token_usage,
         "llm_raw": raw,
+        **settings.model_snapshot(),
     }
     if parsed is not None:
         return {"diagnosis": parsed.model_dump(), "llm_exchange": exchange}
@@ -521,6 +523,52 @@ def make_judge_model():
 # --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
+def _host_model_snapshot() -> dict:
+    from app.config import settings
+
+    return settings.model_snapshot()
+
+
+def _agent_model_snapshot(live_url: str) -> dict | None:
+    """Pull chat/embed models from a live agent's /health when available."""
+    import httpx
+
+    try:
+        r = httpx.get(f"{live_url.rstrip('/')}/health", timeout=5.0)
+        r.raise_for_status()
+        models = (r.json() or {}).get("models")
+        return models if isinstance(models, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _models_for_summary(
+    *, live: bool, live_url: str, results: list[dict], include_judge: bool
+) -> dict:
+    """Reference block: diagnosis models (+ judge when enabled)."""
+    diagnosis = None
+    if live:
+        diagnosis = _agent_model_snapshot(live_url)
+        if not diagnosis:
+            for row in results:
+                ex = row.get("llm_exchange") or {}
+                if ex.get("chat_model") or ex.get("chat_provider"):
+                    diagnosis = {
+                        "chat_provider": ex.get("chat_provider"),
+                        "chat_model": ex.get("chat_model"),
+                        "embed_provider": ex.get("embed_provider"),
+                        "embed_model": ex.get("embed_model"),
+                    }
+                    break
+    else:
+        diagnosis = _host_model_snapshot()
+
+    out: dict = {"diagnosis": diagnosis}
+    if include_judge:
+        out["judge"] = _host_model_snapshot()
+    return out
+
+
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -761,6 +809,12 @@ def main() -> int:
         "mode": "live" if live else "offline",
         "rag_mode": "agent" if live else ("on" if include_rag else "off"),
         "merge": bool(args.merge),
+        "models": _models_for_summary(
+            live=live,
+            live_url=args.live_url or "",
+            results=results,
+            include_judge=bool(args.judge),
+        ),
         "identified_accuracy": round(id_acc, 3),
         "mean_keyword_recall": round(mean_recall, 3),
         "rag_used_rate": round(

@@ -245,6 +245,7 @@ class DiagnosticNodes:
                 "rag_used": bool(rag_ctx),
                 "token_usage": state.get("llm_token_usage")
                 or extract_token_usage(None),
+                **settings.model_snapshot(),
             },
         }
         return {**state, "report": report}

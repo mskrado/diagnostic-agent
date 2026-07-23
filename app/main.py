@@ -46,7 +46,16 @@ app = FastAPI(title="publishi.ai diagnostic agent", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agent_initialized": _agent is not None}
+    from .config import settings
+
+    body = {
+        "status": "ok",
+        "agent_initialized": _agent is not None,
+        "models": settings.model_snapshot(),
+    }
+    if _agent is not None:
+        body["rag_available"] = bool(getattr(_agent.rag, "available", False))
+    return body
 
 
 @app.post("/alert")
