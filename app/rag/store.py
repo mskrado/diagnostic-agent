@@ -66,11 +66,41 @@ def build_rag_store() -> RagStore:
             return RagStore(None)
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
         chunks = splitter.split_documents(docs)
-        store = Chroma.from_documents(
-            chunks, embedding=embeddings, persist_directory=settings.chroma_path
-        )
+        store = _chroma_from_chunks(chunks, embeddings, settings.chroma_path)
         logger.info("RAG store built: %d chunks from %d docs", len(chunks), len(docs))
         return RagStore(store)
     except Exception as exc:  # noqa: BLE001 - startup must not crash on RAG
         logger.warning("Failed to build RAG store: %s; continuing without RAG", exc)
         return RagStore(None)
+
+
+def _chroma_from_chunks(chunks, embeddings, persist_directory: str):
+    """Build Chroma; on embed-dim mismatch wipe the persist dir and rebuild.
+
+    Switching providers (e.g. OpenAI 1536 → Titan 1024) leaves an incompatible
+    on-disk collection; Chroma then fails and the agent would silently run
+    without runbooks.
+    """
+    import shutil
+
+    from langchain_chroma import Chroma
+
+    try:
+        return Chroma.from_documents(
+            chunks, embedding=embeddings, persist_directory=persist_directory
+        )
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "dimension" not in msg and "expecting embedding" not in msg:
+            raise
+        logger.warning(
+            "Chroma embed dimension mismatch (%s); wiping %s and rebuilding",
+            exc,
+            persist_directory,
+        )
+        if os.path.isdir(persist_directory):
+            shutil.rmtree(persist_directory)
+        os.makedirs(persist_directory, exist_ok=True)
+        return Chroma.from_documents(
+            chunks, embedding=embeddings, persist_directory=persist_directory
+        )
