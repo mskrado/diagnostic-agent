@@ -32,21 +32,32 @@ class CategoryAssessment(BaseModel):
     )
     tool_run_examples: list[str] = Field(
         default_factory=list,
-        description="Copy-pasteable verification commands (LogQL, docker, curl, …)",
+        description="Required for each category: 1–3 copy-pasteable verification "
+        "commands specific to this category (LogQL, docker, curl, …)",
+        min_length=0,
     )
     fix_suggestions: list[str] = Field(
         default_factory=list,
-        description="Human remediation steps to resolve this category "
-        "(not auto-executed by the agent)",
+        description="Required for each category: 1–3 human remediation steps for "
+        "this category (not auto-executed by the agent)",
     )
 
 
 class Diagnosis(BaseModel):
     # Per-category assessments: one entry per distinct problem in the logs.
     # Optional/defaulted for backward compatibility with older payloads.
-    issue_categories: list[CategoryAssessment] = Field(default_factory=list)
+    issue_categories: list[CategoryAssessment] = Field(
+        default_factory=list,
+        description="SOURCE OF TRUTH: one full assessment per distinct problem "
+        "(evidence + tool_run_examples + fix_suggestions). Do not put problems "
+        "only in secondary_hypotheses.",
+    )
     primary_hypothesis: Hypothesis
-    secondary_hypotheses: list[Hypothesis] = Field(default_factory=list)
+    secondary_hypotheses: list[Hypothesis] = Field(
+        default_factory=list,
+        description="Short mirror of non-primary category causes only — not a "
+        "substitute for full issue_categories entries",
+    )
     blast_radius_assessment: str
     suggested_next_steps: list[str]
     tool_run_examples: list[str] = Field(

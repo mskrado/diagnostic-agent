@@ -12,6 +12,9 @@ def test_system_prompt_requires_tool_runs_and_fix_suggestions():
     assert "Do NOT auto-remediate" in SYSTEM_PROMPT
     assert "docker compose ps" in SYSTEM_PROMPT
     assert "LogQL" in SYSTEM_PROMPT or "loki" in SYSTEM_PROMPT.lower()
+    assert "NEVER put an issue only under" in SYSTEM_PROMPT
+    assert "SOURCE OF TRUTH" in SYSTEM_PROMPT
+    assert "EVERY category" in SYSTEM_PROMPT or "every category" in SYSTEM_PROMPT.lower()
 
 
 def test_diagnosis_schema_accepts_tool_and_fix_fields():
