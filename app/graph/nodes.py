@@ -96,10 +96,17 @@ class DiagnosticNodes:
         if pending is not None:
             prom_data[service]["db_pool_pending"] = pending
 
-        # Error/warn logs for the affected service (Spring Boot JSON).
-        # Include WARN so smoke tests and soft failures (e.g. S3 health) appear
-        # in diagnostic emails when no ERROR lines exist yet.
-        logql = f'{{service="{service}"}} | json | level=~"ERROR|WARN"'
+        # Logs for the alert target. Logical labels (security, postgres, …)
+        # map to real Loki streams via service_map; alert-specific line filters
+        # mirror the Loki ruler so the email sample matches what fired.
+        from ..log_queries import build_retrieve_logql
+
+        logql, log_meta = build_retrieve_logql(
+            service=service,
+            alert_type=state.get("alert_type"),
+            log_services=self.dep_map.log_services(service),
+            log_selector=self.dep_map.log_selector(service),
+        )
         lookback = settings.loki_lookback_minutes
         raw_entries = self.loki.query_range(
             logql,
@@ -112,9 +119,12 @@ class DiagnosticNodes:
             "url": settings.loki_url,
             "logql": logql,
             "lookback_minutes": lookback,
-            "level": "ERROR|WARN",
+            "level": log_meta.get("level") or "(any)",
             "service": service,
+            "log_services": log_meta.get("log_services") or [service],
         }
+        if log_meta.get("line_filter"):
+            log_source["line_filter"] = log_meta["line_filter"]
 
         # Refine module hint from logs if not provided on the alert.
         module_hint = state.get("module_hint", "")
@@ -143,12 +153,19 @@ class DiagnosticNodes:
 
     # ---- rag_lookup ----------------------------------------------------
     def rag_lookup(self, state: DiagnosticState) -> DiagnosticState:
-        log_excerpt = " ".join(state.get("loki_logs", [])[:3])
-        query = (
-            f"{state.get('alert_type', '')} {state.get('service', '')} "
-            f"{state.get('module_hint', '')} {log_excerpt}"
-        ).strip()
-        context = self.rag.query(query)
+        # Retrieve per distinct error family across the *full* log sample so
+        # mixed incidents pull redis/jvm/postgres runbooks together — not only
+        # whatever family appears in logs[:3].
+        from ..rag.queries import build_rag_queries
+
+        logs = list(state.get("loki_logs") or [])
+        queries = build_rag_queries(
+            alert_type=state.get("alert_type", "") or "",
+            service=state.get("service", "") or "",
+            module_hint=state.get("module_hint", "") or "",
+            log_lines=logs,
+        )
+        context = self.rag.query_many(queries)
         return {**state, "rag_context": context}
 
     # ---- correlate -----------------------------------------------------
@@ -230,6 +247,8 @@ class DiagnosticNodes:
                 "log_source": state.get("log_source") or {},
                 "rag_used": bool(rag_ctx),
             },
+            # Chat/embed ids for email + audit (also mirrored on llm_exchange).
+            "models": settings.model_snapshot(),
             # Full prompts + tokens for RAG effectiveness / cost (also in audit JSONL).
             "llm_exchange": {
                 "system_prompt": state.get("llm_system_prompt") or SYSTEM_PROMPT,
@@ -238,6 +257,7 @@ class DiagnosticNodes:
                 "rag_used": bool(rag_ctx),
                 "token_usage": state.get("llm_token_usage")
                 or extract_token_usage(None),
+                **settings.model_snapshot(),
             },
         }
         return {**state, "report": report}

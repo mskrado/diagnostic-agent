@@ -158,14 +158,17 @@ def format_logs(lines: list[str]) -> list[str]:
     return LokiClient.format_log_entries(pairs)
 
 
-def rag_query_for_case(case: dict, logs: list[str]) -> str:
-    """Same query shape as DiagnosticNodes.rag_lookup."""
+def rag_queries_for_case(case: dict, logs: list[str]) -> list[str]:
+    """Same multi-family RAG queries as DiagnosticNodes.rag_lookup."""
+    from app.rag.queries import build_rag_queries
+
     alert = case.get("alert", {})
-    log_excerpt = " ".join(logs[:3])
-    return (
-        f"{alert.get('alertname', '')} {alert.get('service', '')} "
-        f"{alert.get('module', '')} {log_excerpt}"
-    ).strip()
+    return build_rag_queries(
+        alert_type=alert.get("alertname", "") or "",
+        service=alert.get("service", "") or "",
+        module_hint=alert.get("module", "") or "",
+        log_lines=logs,
+    )
 
 
 def get_rag_store():
@@ -182,7 +185,7 @@ def retrieve_rag_context(case: dict, logs: list[str]) -> str:
     store = get_rag_store()
     if not store.available:
         return ""
-    return store.query(rag_query_for_case(case, logs)) or ""
+    return store.query_many(rag_queries_for_case(case, logs)) or ""
 
 
 def build_prompt(case: dict, rag_context: str = "") -> tuple[str, str]:
@@ -226,6 +229,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     """Return {diagnosis, llm_exchange} for offline scoring + prompt/token audit."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    from app.config import settings
     from app.llm_usage import extract_token_usage
 
     formatted = format_logs(case.get("logs", []))
@@ -243,6 +247,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
         "rag_used": bool(rag_context),
         "token_usage": token_usage,
         "llm_raw": raw,
+        **settings.model_snapshot(),
     }
     if parsed is not None:
         return {"diagnosis": parsed.model_dump(), "llm_exchange": exchange}
@@ -456,40 +461,83 @@ def score_merged_case(merged: dict, diag: dict) -> dict:
     }
 
 
+def _diagnosis_payload_for_judge(diag: dict) -> dict:
+    """Full diagnosis JSON for the judge (drop internal eval-only keys)."""
+    return {
+        k: v
+        for k, v in (diag or {}).items()
+        if not str(k).startswith("_")
+    }
+
+
+def _known_causes_checklist(case: dict) -> tuple[str, list[str]]:
+    """Structured known-cause list; skip insufficient-data controls."""
+    sources = case.get("source_cases") or []
+    if sources:
+        lines: list[str] = []
+        required_ids: list[str] = []
+        controls: list[str] = []
+        for src in sources:
+            sid = src.get("id") or "?"
+            system = src.get("system") or "?"
+            root = (src.get("expected") or {}).get("root_cause", "")
+            if system == "insufficient-data":
+                controls.append(f"- id={sid} (CONTROL): {root}")
+                continue
+            required_ids.append(sid)
+            lines.append(f"- id={sid} system={system}: {root}")
+        body = "Required concurrent root causes (credit if found anywhere in MODEL diagnosis):\n"
+        body += "\n".join(lines) if lines else "(none)"
+        if controls:
+            body += (
+                "\n\nControl cases (do NOT require a matching hypothesis; "
+                "penalize only if the model invents a confident cause with no evidence):\n"
+            )
+            body += "\n".join(controls)
+        return body, required_ids
+
+    root = (case.get("expected") or {}).get("root_cause", "")
+    return f"KNOWN root cause:\n{root}", []
+
+
+def build_judge_prompt(case: dict, diag: dict) -> str:
+    """Prompt that grades the FULL model diagnosis, not only primary/secondary."""
+    known_block, _required = _known_causes_checklist(case)
+    model_json = json.dumps(_diagnosis_payload_for_judge(diag), indent=2, default=str)
+    if case.get("merged_from"):
+        return (
+            "You are grading a diagnostic model on a MIXED multi-failure incident.\n"
+            "You MUST review the ENTIRE MODEL diagnosis JSON below — including "
+            "issue_categories (category, cause, confidence, evidence, "
+            "suggested_next_step), primary_hypothesis, secondary_hypotheses, "
+            "blast_radius_assessment, and suggested_next_steps. Do NOT grade from "
+            "primary_hypothesis alone; a cause listed only under issue_categories "
+            "still counts as identified.\n\n"
+            "Score 0-5 (5 = essentially all required concurrent causes appear "
+            "somewhere in the diagnosis with sound grounding; 0 = wrong or ignores "
+            "the mix). Set correct=true only if most required causes are identified "
+            "somewhere in that full JSON.\n"
+            "In your reason, name which required ids were found vs missed; do not "
+            "claim a miss for a cause that appears in issue_categories.\n\n"
+            f"{known_block}\n\n"
+            f"MODEL diagnosis (full JSON):\n{model_json}\n"
+        )
+    return (
+        "You are grading a diagnostic model. Review the ENTIRE MODEL diagnosis JSON "
+        "(issue_categories if present, primary_hypothesis, secondary_hypotheses, "
+        "evidence, suggested_next_steps) against the known root cause. Score 0-5 "
+        "(5 = correctly identifies the true root cause with sound reasoning; "
+        "0 = wrong or hallucinated). Set correct=true only if the diagnosis "
+        "matches the true root cause (primary or a clear issue_categories entry).\n\n"
+        f"{known_block}\n\n"
+        f"MODEL diagnosis (full JSON):\n{model_json}\n"
+    )
+
+
 def judge_case(judge_model, case: dict, diag: dict) -> dict:
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    primary = diag.get("primary_hypothesis", {}) or {}
-    secondaries = diag.get("secondary_hypotheses") or []
-    sec_text = "; ".join(
-        (h.get("cause") or "") for h in secondaries if isinstance(h, dict)
-    )
-    if case.get("merged_from"):
-        known = (case.get("expected") or {}).get("root_cause", "")
-        verdict_prompt = (
-            "You are grading a diagnostic model on a MIXED multi-failure incident. "
-            "KNOWN root causes lists several concurrent failures that appear together "
-            "in the logs. Score 0-5 (5 = surfaces essentially all known concurrent "
-            "causes across primary and secondary hypotheses; 0 = wrong or ignores "
-            "the mix). Set correct=true only if most known causes are identified "
-            "somewhere in the diagnosis (primary or secondary).\n\n"
-            f"KNOWN concurrent root causes: {known}\n\n"
-            f"MODEL primary cause: {primary.get('cause', '')}\n"
-            f"MODEL evidence: {primary.get('evidence', '')}\n"
-            f"MODEL secondary causes: {sec_text}\n"
-            f"MODEL confidence_note: {diag.get('confidence_note')}"
-        )
-    else:
-        verdict_prompt = (
-            "You are grading a diagnostic model. Compare the model's PRIMARY hypothesis "
-            "to the KNOWN root cause. Score 0-5 (5 = correctly identifies the true root "
-            "cause with sound reasoning; 0 = wrong or hallucinated). Set correct=true "
-            "only if the primary hypothesis matches the true root cause.\n\n"
-            f"KNOWN root cause: {case.get('expected', {}).get('root_cause', '')}\n\n"
-            f"MODEL primary cause: {primary.get('cause', '')}\n"
-            f"MODEL evidence: {primary.get('evidence', '')}\n"
-            f"MODEL confidence_note: {diag.get('confidence_note')}"
-        )
+    verdict_prompt = build_judge_prompt(case, diag)
     try:
         v = judge_model.invoke(
             [
@@ -518,6 +566,52 @@ def make_judge_model():
 # --------------------------------------------------------------------------
 # main
 # --------------------------------------------------------------------------
+def _host_model_snapshot() -> dict:
+    from app.config import settings
+
+    return settings.model_snapshot()
+
+
+def _agent_model_snapshot(live_url: str) -> dict | None:
+    """Pull chat/embed models from a live agent's /health when available."""
+    import httpx
+
+    try:
+        r = httpx.get(f"{live_url.rstrip('/')}/health", timeout=5.0)
+        r.raise_for_status()
+        models = (r.json() or {}).get("models")
+        return models if isinstance(models, dict) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _models_for_summary(
+    *, live: bool, live_url: str, results: list[dict], include_judge: bool
+) -> dict:
+    """Reference block: diagnosis models (+ judge when enabled)."""
+    diagnosis = None
+    if live:
+        diagnosis = _agent_model_snapshot(live_url)
+        if not diagnosis:
+            for row in results:
+                ex = row.get("llm_exchange") or {}
+                if ex.get("chat_model") or ex.get("chat_provider"):
+                    diagnosis = {
+                        "chat_provider": ex.get("chat_provider"),
+                        "chat_model": ex.get("chat_model"),
+                        "embed_provider": ex.get("embed_provider"),
+                        "embed_model": ex.get("embed_model"),
+                    }
+                    break
+    else:
+        diagnosis = _host_model_snapshot()
+
+    out: dict = {"diagnosis": diagnosis}
+    if include_judge:
+        out["judge"] = _host_model_snapshot()
+    return out
+
+
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -758,6 +852,12 @@ def main() -> int:
         "mode": "live" if live else "offline",
         "rag_mode": "agent" if live else ("on" if include_rag else "off"),
         "merge": bool(args.merge),
+        "models": _models_for_summary(
+            live=live,
+            live_url=args.live_url or "",
+            results=results,
+            include_judge=bool(args.judge),
+        ),
         "identified_accuracy": round(id_acc, 3),
         "mean_keyword_recall": round(mean_recall, 3),
         "rag_used_rate": round(

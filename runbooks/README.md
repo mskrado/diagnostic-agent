@@ -1,7 +1,9 @@
 # Diagnostic agent runbooks
 
 Markdown corpus for RAG (`AGENT_RAG_ENABLED=true`). The agent chunks files at
-**800 characters / 80 overlap** and retrieves **top_k=3** chunks per alert.
+**800 characters / 80 overlap**. Retrieval is **per distinct error family** in
+the log sample (`AGENT_RAG_TOP_K` chunks each, capped by `AGENT_RAG_MAX_CHUNKS`)
+so mixed incidents can surface postgres + redis + JVM runbooks together.
 
 ## Layout
 

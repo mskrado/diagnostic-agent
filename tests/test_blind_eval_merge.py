@@ -160,3 +160,90 @@ def test_score_merged_partial_miss():
     assert score["systems_hit"] == 1
     assert score["identified"] is False
     assert score["systems_hit_rate"] == 0.5
+
+
+def test_build_judge_prompt_includes_full_diagnosis_json():
+    from eval.run_blind_eval import build_judge_prompt
+
+    case = _case(
+        "postgres-connectivity",
+        "postgresql",
+        ["x"],
+        expected={"cause_keywords": ["postgres"], "root_cause": "DB down"},
+    )
+    diag = {
+        "_rag_used": True,
+        "primary_hypothesis": {"cause": "primary only", "evidence": "e1"},
+        "issue_categories": [
+            {
+                "category": "database",
+                "cause": "Postgres connection refused",
+                "confidence": 90,
+                "evidence": "Connection refused",
+            }
+        ],
+        "confidence_note": "high",
+    }
+    prompt = build_judge_prompt(case, diag)
+    assert "ENTIRE MODEL diagnosis JSON" in prompt or "full JSON" in prompt
+    assert "Postgres connection refused" in prompt
+    assert "issue_categories" in prompt
+    assert "_rag_used" not in prompt
+    assert "KNOWN root cause" in prompt
+    assert "DB down" in prompt
+
+
+def test_build_judge_prompt_merged_credits_categories_and_skips_controls():
+    from eval.run_blind_eval import build_judge_prompt, merge_cases
+
+    sources = [
+        _case(
+            "postgres-connectivity",
+            "postgresql",
+            ["pg"],
+            expected={"cause_keywords": ["postgres"], "root_cause": "Postgres unreachable"},
+        ),
+        _case(
+            "redis-connection",
+            "redis",
+            ["rd"],
+            expected={"cause_keywords": ["redis"], "root_cause": "Redis auth failed"},
+        ),
+        _case(
+            "no-signal-control",
+            "insufficient-data",
+            ["ok"],
+            expected={
+                "cause_keywords": ["insufficient"],
+                "root_cause": "Not enough signal",
+            },
+        ),
+    ]
+    merged = merge_cases(sources, seed=1)
+    diag = {
+        "primary_hypothesis": {"cause": "Redis auth", "evidence": "NOAUTH"},
+        "issue_categories": [
+            {
+                "category": "database",
+                "cause": "Postgres unreachable",
+                "evidence": "Connection refused",
+            },
+            {
+                "category": "cache",
+                "cause": "Redis auth failed",
+                "evidence": "NOAUTH",
+            },
+        ],
+        "suggested_next_steps": ["Check SG", "Rotate redis password"],
+    }
+    prompt = build_judge_prompt(merged, diag)
+    assert "MIXED multi-failure" in prompt
+    assert "issue_categories" in prompt
+    assert "Postgres unreachable" in prompt
+    assert "Redis auth failed" in prompt
+    assert "CONTROL" in prompt
+    assert "no-signal-control" in prompt
+    assert "do NOT require a matching hypothesis" in prompt
+    assert "Postgres unreachable" in prompt  # in known checklist
+    assert '"category": "database"' in prompt or "Postgres unreachable" in prompt
+    assert "suggested_next_steps" in prompt

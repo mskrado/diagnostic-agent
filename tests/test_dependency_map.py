@@ -31,3 +31,12 @@ def test_module_dependencies():
     dm = _load()
     assert "postgres" in dm.module_dependencies("auth")
     assert "elasticsearch" in dm.module_dependencies("search")
+
+
+def test_log_services_for_logical_alert_targets():
+    dm = _load()
+    assert dm.log_services("security") == ["platform-service", "api-gateway"]
+    assert dm.log_services("postgres") == ["platform-service"]
+    assert dm.log_services("platform-service") == ["platform-service"]
+    assert dm.log_selector("frontend") == '{app="publishi-frontend"}'
+    assert dm.log_selector("security") is None

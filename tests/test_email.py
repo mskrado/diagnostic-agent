@@ -12,6 +12,12 @@ def test_format_diagnosis_email_includes_hypothesis():
         "alert_type": "HighErrorRate",
         "severity": "warning",
         "blast_radius": ["postgres"],
+        "models": {
+            "chat_provider": "bedrock",
+            "chat_model": "amazon.nova-micro-v1:0",
+            "embed_provider": "bedrock",
+            "embed_model": "amazon.titan-embed-text-v2:0",
+        },
         "diagnosis": {
             "primary_hypothesis": {
                 "cause": "db pool saturation",
@@ -20,6 +26,7 @@ def test_format_diagnosis_email_includes_hypothesis():
             },
             "secondary_hypotheses": [{"cause": "redis timeout", "confidence": 40}],
             "suggested_next_steps": ["Check pg_stat_activity"],
+            "confidence_note": "high",
         },
         "evidence": {
             "rag_used": True,
@@ -52,6 +59,12 @@ def test_format_diagnosis_email_includes_hypothesis():
     assert "redis timeout" in plain
     assert "pg_stat_activity" in plain
     assert "db pool saturation" in html
+    assert "Models:" in plain
+    assert "Diagnosis: bedrock / amazon.nova-micro-v1:0" in plain
+    assert "Embeddings: bedrock / amazon.titan-embed-text-v2:0" in plain
+    assert "Confidence note: high" in plain
+    assert "<h3>Models</h3>" in html
+    assert "amazon.nova-micro-v1:0" in html
     assert "Log source:" in plain
     assert "http://loki:3100" in plain
     assert 'service="platform-service"' in plain
@@ -106,10 +119,66 @@ def test_format_diagnosis_email_renders_issue_categories():
     _, plain, html = format_diagnosis_email(report)
     assert "Issue categories" in plain
     assert "[database] Postgres connection refused (85%)" in plain
+    assert "evidence: Connection to postgres:5432 refused" in plain
     assert "[cache] Redis command timeout (60%)" in plain
     assert "next: Check postgres container health" in plain
     assert "Issue categories" in html
     assert "Postgres connection refused" in html
+    assert "Connection to postgres:5432 refused" in html
+
+
+def test_format_diagnosis_email_includes_judge_when_present():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "warning",
+        "blast_radius": [],
+        "models": {
+            "chat_provider": "bedrock",
+            "chat_model": "amazon.nova-lite-v1:0",
+            "embed_provider": "bedrock",
+            "embed_model": "amazon.titan-embed-text-v2:0",
+        },
+        "judge": {
+            "score": 4,
+            "correct": True,
+            "reason": "Found postgres and redis in issue_categories",
+            "models": {
+                "chat_provider": "bedrock",
+                "chat_model": "amazon.nova-micro-v1:0",
+            },
+        },
+        "diagnosis": {
+            "primary_hypothesis": {"cause": "multi-failure", "confidence": 70},
+        },
+        "evidence": {"rag_used": False, "metrics": {}},
+    }
+    _, plain, html = format_diagnosis_email(report)
+    assert "Judge:" in plain
+    assert "Score: 4/5" in plain
+    assert "Correct: yes" in plain
+    assert "Found postgres and redis in issue_categories" in plain
+    assert "Judge: bedrock / amazon.nova-micro-v1:0" in plain
+    assert "<h3>Judge</h3>" in html
+    assert "4/5" in html
+    assert "Found postgres and redis" in html
+
+
+def test_format_diagnosis_email_omits_judge_when_absent():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "warning",
+        "blast_radius": [],
+        "diagnosis": {
+            "primary_hypothesis": {"cause": "x", "confidence": 50},
+        },
+        "evidence": {"rag_used": False, "metrics": {}},
+    }
+    _, plain, html = format_diagnosis_email(report)
+    assert "Judge:" not in plain
+    assert "<h3>Judge</h3>" not in html
+    assert "Models:" in plain  # falls back to settings snapshot
 
 
 def test_format_diagnosis_email_empty_logs():
