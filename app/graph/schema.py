@@ -28,7 +28,16 @@ class CategoryAssessment(BaseModel):
     evidence: str = ""
     suggested_next_step: str = Field(
         default="",
-        description="Single best read-only investigative action for this category",
+        description="Single best short investigative action for this category",
+    )
+    tool_run_examples: list[str] = Field(
+        default_factory=list,
+        description="Copy-pasteable verification commands (LogQL, docker, curl, …)",
+    )
+    fix_suggestions: list[str] = Field(
+        default_factory=list,
+        description="Human remediation steps to resolve this category "
+        "(not auto-executed by the agent)",
     )
 
 
@@ -40,4 +49,12 @@ class Diagnosis(BaseModel):
     secondary_hypotheses: list[Hypothesis] = Field(default_factory=list)
     blast_radius_assessment: str
     suggested_next_steps: list[str]
+    tool_run_examples: list[str] = Field(
+        default_factory=list,
+        description="Top-level copy-pasteable verification commands for the incident",
+    )
+    fix_suggestions: list[str] = Field(
+        default_factory=list,
+        description="Top-level human remediation steps (not auto-executed)",
+    )
     confidence_note: Literal["low", "medium", "high"]

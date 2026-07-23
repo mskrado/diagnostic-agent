@@ -369,8 +369,12 @@ def _text_pool(diag: dict) -> str:
             parts.append(c.get("cause", ""))
             parts.append(c.get("evidence", ""))
             parts.append(c.get("suggested_next_step", ""))
+            parts.extend(c.get("tool_run_examples", []) or [])
+            parts.extend(c.get("fix_suggestions", []) or [])
     parts.append(diag.get("blast_radius_assessment", ""))
     parts.extend(diag.get("suggested_next_steps", []) or [])
+    parts.extend(diag.get("tool_run_examples", []) or [])
+    parts.extend(diag.get("fix_suggestions", []) or [])
     return " ".join(parts).lower()
 
 

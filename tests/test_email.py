@@ -127,6 +127,55 @@ def test_format_diagnosis_email_renders_issue_categories():
     assert "Connection to postgres:5432 refused" in html
 
 
+def test_format_diagnosis_email_renders_tools_and_fixes():
+    report = {
+        "service": "platform-service",
+        "alert_type": "PostgresErrorsInLogs",
+        "severity": "warning",
+        "blast_radius": ["postgres"],
+        "diagnosis": {
+            "issue_categories": [
+                {
+                    "category": "database",
+                    "cause": "Postgres connection refused",
+                    "confidence": 90,
+                    "evidence": "Connection refused",
+                    "suggested_next_step": "Check postgres container",
+                    "tool_run_examples": ["docker compose ps postgres"],
+                    "fix_suggestions": ["Restart postgres if exited (brief downtime)."],
+                }
+            ],
+            "primary_hypothesis": {
+                "cause": "Postgres connection refused",
+                "confidence": 90,
+                "evidence": "Connection refused",
+            },
+            "suggested_next_steps": ["Check postgres container"],
+            "tool_run_examples": [
+                "docker logs publishi-postgres --tail 100",
+                "curl -sf http://localhost:8080/actuator/health",
+            ],
+            "fix_suggestions": [
+                "Verify SPRING_DATASOURCE_PASSWORD matches POSTGRES_PASSWORD.",
+                "Restart postgres if the container is exited (brief downtime).",
+            ],
+            "confidence_note": "high",
+        },
+        "evidence": {"rag_used": False, "metrics": {}, "error_log_sample": []},
+    }
+    _, plain, html = format_diagnosis_email(report)
+    assert "Tool run examples" in plain
+    assert "$ docker logs publishi-postgres --tail 100" in plain
+    assert "Fix suggestions" in plain
+    assert "SPRING_DATASOURCE_PASSWORD" in plain
+    assert "tool runs:" in plain
+    assert "$ docker compose ps postgres" in plain
+    assert "fixes:" in plain
+    assert "Tool run examples" in html
+    assert "Fix suggestions" in html
+    assert "no auto-remediation" in plain
+
+
 def test_format_diagnosis_email_includes_judge_when_present():
     report = {
         "service": "platform-service",

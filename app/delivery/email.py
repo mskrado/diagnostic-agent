@@ -103,7 +103,7 @@ def _models_plain_lines(report: dict) -> list[str]:
 
 
 def _format_issue_categories(diagnosis: dict) -> list[str]:
-    """Plain-text lines for issue_categories (cause, confidence, evidence, next)."""
+    """Plain-text lines for issue_categories (cause, evidence, tools, fixes)."""
     lines: list[str] = []
     for item in diagnosis.get("issue_categories") or []:
         if not isinstance(item, dict) or not item.get("cause"):
@@ -117,8 +117,32 @@ def _format_issue_categories(diagnosis: dict) -> list[str]:
         nxt = (item.get("suggested_next_step") or "").strip()
         if nxt:
             line += f"\n      next: {nxt}"
+        tools = [str(t).strip() for t in (item.get("tool_run_examples") or []) if str(t).strip()]
+        if tools:
+            line += "\n      tool runs:"
+            for t in tools:
+                line += f"\n        $ {t}"
+        fixes = [str(f).strip() for f in (item.get("fix_suggestions") or []) if str(f).strip()]
+        if fixes:
+            line += "\n      fixes:"
+            for f in fixes:
+                line += f"\n        - {f}"
         lines.append(line)
     return lines
+
+
+def _bullet_block(items: list | None, empty: str = "  - (none)") -> str:
+    cleaned = [str(s).strip() for s in (items or []) if str(s).strip()]
+    if not cleaned:
+        return empty
+    return "\n".join(f"  - {s}" for s in cleaned)
+
+
+def _command_block(items: list | None, empty: str = "  - (none)") -> str:
+    cleaned = [str(s).strip() for s in (items or []) if str(s).strip()]
+    if not cleaned:
+        return empty
+    return "\n".join(f"  $ {s}" for s in cleaned)
 
 
 def _extract_judge(report: dict) -> dict | None:
@@ -217,12 +241,22 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
     judge_lines = _judge_plain_lines(judge) if judge else []
 
     blast = ", ".join(report.get("blast_radius", []) or []) or "none identified"
-    steps = report.get("diagnosis", {}).get("suggested_next_steps", []) if isinstance(
-        diagnosis, dict
-    ) else []
+    steps = []
+    tool_examples: list[str] = []
+    fix_suggestions: list[str] = []
+    if isinstance(diagnosis, dict):
+        steps = diagnosis.get("suggested_next_steps") or []
+        tool_examples = diagnosis.get("tool_run_examples") or []
+        fix_suggestions = diagnosis.get("fix_suggestions") or []
     if not isinstance(steps, list):
         steps = []
-    steps_block = "\n".join(f"  - {s}" for s in steps if s) or "  - (none)"
+    if not isinstance(tool_examples, list):
+        tool_examples = []
+    if not isinstance(fix_suggestions, list):
+        fix_suggestions = []
+    steps_block = _bullet_block(steps)
+    tools_block = _command_block(tool_examples)
+    fixes_block = _bullet_block(fix_suggestions)
 
     evidence_block = report.get("evidence") or {}
     rag_used = evidence_block.get("rag_used", False)
@@ -255,8 +289,14 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
             "",
             f"Blast radius: {blast}",
             "",
-            "Suggested next steps (read-only):",
+            "Suggested next steps (investigate):",
             steps_block,
+            "",
+            "Tool run examples (copy-paste; human-run):",
+            tools_block,
+            "",
+            "Fix suggestions (human-run; agent does not auto-remediate):",
+            fixes_block,
             "",
             "Log source:",
             *source_lines,
@@ -267,7 +307,7 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
             f"RAG used: {'yes' if rag_used else 'no'}",
             f"Metrics snapshot keys: {', '.join(sorted(metrics.keys())) or 'none'}",
             "",
-            "Hypotheses only — no auto-remediation.",
+            "Hypotheses + guidance only — no auto-remediation.",
         ]
     )
     plain = redact_text("\n".join(plain_parts))
@@ -275,6 +315,8 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
     source_pre = escape("\n".join(line.strip() for line in source_lines))
     logs_pre = escape("\n".join(line.strip() for line in log_lines))
     steps_pre = escape(steps_block)
+    tools_pre = escape(tools_block)
+    fixes_pre = escape(fixes_block)
     models = _resolve_models(report)
     models_html = (
         "<h3>Models</h3><ul>"
@@ -332,11 +374,13 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
         )
         + judge_html
         + f"<p><b>Blast radius:</b> {escape(blast)}</p>"
-        f"<h3>Suggested next steps (read-only)</h3><pre>{steps_pre}</pre>"
+        f"<h3>Suggested next steps (investigate)</h3><pre>{steps_pre}</pre>"
+        f"<h3>Tool run examples (copy-paste; human-run)</h3><pre>{tools_pre}</pre>"
+        f"<h3>Fix suggestions (human-run)</h3><pre>{fixes_pre}</pre>"
         f"<h3>Log source</h3><pre>{source_pre}</pre>"
         f"<h3>Recent error/warn logs</h3><pre>{logs_pre}</pre>"
         f"<p><small>RAG used: {'yes' if rag_used else 'no'} | "
-        "Hypotheses only — no auto-remediation.</small></p>"
+        "Hypotheses + guidance only — no auto-remediation.</small></p>"
         "</body></html>"
     )
     return subject, plain, html
