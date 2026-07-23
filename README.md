@@ -89,7 +89,38 @@ diagnostic-agent/
 ## Configuration
 
 All settings are environment variables prefixed `AGENT_` (see `.env.example`).
-The most important:
+
+### `DIAGNOSTIC_AGENT_*` vs `AGENT_*` (read this)
+
+Two naming conventions exist on purpose; they are **not interchangeable**:
+
+| Context | Prefix to set | Who renames / reads it |
+|---|---|---|
+| **Docker Compose** (repo-root `.env`) | `DIAGNOSTIC_AGENT_*` | Compose maps → `AGENT_*` inside the container (`docker-compose.observability.yml`) |
+| **Host Python** (blind eval, local pytest, `uvicorn` outside Docker) | `AGENT_*` | `app/config.py` (`env_prefix="AGENT_"`) reads them **directly** — no rename |
+| **AWS / OpenAI / Anthropic SDKs** | `AWS_*`, `OPENAI_API_KEY`, … | Provider SDKs; **not** `AGENT_`-prefixed. Compose maps `DIAGNOSTIC_AGENT_AWS_*` → `AWS_*` for the container only |
+
+**Common footgun:** putting `DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse` in
+`diagnostic-agent/.env` and running `python eval/run_blind_eval.py`. That key is
+**ignored**; Settings falls back to the code default (`ollama` /
+`mistral:7b-instruct`). For offline eval use:
+
+```env
+# diagnostic-agent/.env  (host tools — AGENT_ prefix)
+AGENT_CHAT_PROVIDER=bedrock_converse
+AGENT_CHAT_MODEL=amazon.nova-micro-v1:0
+AGENT_EMBED_PROVIDER=bedrock
+AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
+AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+For the **container**, keep the same values under `DIAGNOSTIC_AGENT_*` (and
+`DIAGNOSTIC_AGENT_AWS_*`) in the **repo-root** `.env`.
+
+The most important `AGENT_*` settings:
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -100,7 +131,7 @@ The most important:
 | `AGENT_CHAT_MODEL_KWARGS` | `{"region_name":"us-east-1"}` | JSON passthrough (`base_url`, `region_name`, …) |
 | `AGENT_EMBED_MODEL_KWARGS` | `{"region_name":"us-east-1"}` | JSON passthrough for embeddings |
 | `AGENT_LLM_TEMPERATURE` | `0.1` | Chat temperature |
-| `OPENAI_API_KEY` | — | When using OpenAI override; also `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or agent-scoped AWS creds (`DIAGNOSTIC_AGENT_AWS_*`) |
+| `OPENAI_API_KEY` / `AWS_*` | — | SDK credentials (not `AGENT_`-prefixed). In Compose use `DIAGNOSTIC_AGENT_AWS_*` so they don’t collide with MinIO `AWS_*` |
 | `AGENT_GRAFANA_TOKEN` | — | Editor (OSS DEV) or Viewer + `annotations:write` (Enterprise); empty disables Grafana |
 | `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Set `false` to skip annotation delivery |
 | `AGENT_EMAIL_ENABLED` | `true` | SMTP diagnostic email (hypotheses); separate from Alertmanager alert mail |
@@ -142,7 +173,10 @@ Chat and embeddings are configured independently with the same four knobs each:
 | **Credentials** | *(SDK env var, not `AGENT_`-prefixed)* | same | Bedrock: `DIAGNOSTIC_AGENT_AWS_*` (agent-only; not MinIO `AWS_*`). Also `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or EC2 instance role in PROD |
 
 The compose overlay reads these from the **root** `.env` (copy from `env.example`)
-and maps `DIAGNOSTIC_AGENT_*` → the agent's `AGENT_*` settings.
+and maps `DIAGNOSTIC_AGENT_*` → the agent's `AGENT_*` settings. That mapping
+happens **only for the container**. Host-side tools (`python eval/run_blind_eval.py`,
+local pytest) must use `AGENT_*` (and `AWS_*` / `OPENAI_API_KEY`) directly — see
+[DIAGNOSTIC_AGENT_* vs AGENT_*](#diagnostic_agent_-vs-agent_-read-this) above.
 
 #### Switch procedure (3 steps)
 
@@ -268,7 +302,9 @@ DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"base_url":"http://ollama:11434"}
 
 ```bash
 DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
-DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v2:0
+# Haiku on Bedrock is ...-v1:0 (not v2). Prefer an inference profile if Converse rejects the FM id:
+#   us.anthropic.claude-3-5-haiku-20241022-v1:0
+DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v1:0
 DIAGNOSTIC_AGENT_EMBED_PROVIDER=bedrock
 DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
 DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
@@ -606,13 +642,14 @@ runbooks, so no answer leaks). Full guide + **CLI parameter reference**:
 ```bash
 cd diagnostic-agent
 
-# Offline (no stack needed; uses the configured AGENT_CHAT_* provider)
+# Offline — requires AGENT_* (not DIAGNOSTIC_AGENT_*) in diagnostic-agent/.env or the shell.
+# See "DIAGNOSTIC_AGENT_* vs AGENT_*" under Configuration.
 python eval/run_blind_eval.py
 python eval/run_blind_eval.py --judge                       # + 0-5 LLM-as-judge score
 python eval/run_blind_eval.py --only jvm-heap-oom           # single case
 python eval/run_blind_eval.py --only redis-connection --judge
 
-# Live full pipeline: push logs into Loki, fire /alert, read the diagnosis
+# Live full pipeline: uses the *container* LLM (DIAGNOSTIC_AGENT_* from root .env via compose)
 DIAGNOSTIC_AGENT_RAG_ENABLED=false docker compose -f docker-compose.yml \
   -f docker-compose.observability.yml --profile diagnostic-agent up -d --force-recreate diagnostic-agent
 python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
@@ -758,7 +795,7 @@ via the standard AWS credential chain:
     "Effect": "Allow",
     "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
     "Resource": [
-      "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v2:0",
+      "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
       "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
     ]
   }]
@@ -770,7 +807,9 @@ defaults from `env.aws.example`):
 
 ```bash
 DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
-DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v2:0
+# Haiku on Bedrock is ...-v1:0 (not v2). Prefer an inference profile if Converse rejects the FM id:
+#   us.anthropic.claude-3-5-haiku-20241022-v1:0
+DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v1:0
 DIAGNOSTIC_AGENT_EMBED_PROVIDER=bedrock
 DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
 DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}

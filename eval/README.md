@@ -104,6 +104,8 @@ python eval/run_blind_eval.py -h
 | `--judge` | flag; default off | Extra LLM call per case that grades the primary hypothesis against `expected.root_cause`. Adds `judge_score` (0–5), `judge_correct`, `judge_reason`, and summary `mean_judge_score` / `judge_correct_rate`. Costs ~1× more LLM calls. |
 | `--live-url URL` | string; default empty (= offline) | Base URL of a running diagnostic-agent. Enables **live** mode: `POST {URL}/alert` with the case’s alert labels and score the returned `diagnosis`. Does **not** inject logs by itself. Example: `http://localhost:8001`. |
 | `--loki-url URL` | string; default empty | Loki base URL used **only in live mode** to inject the case’s `logs:` via `POST {URL}/loki/api/v1/push` before `/alert`. Example: `http://localhost:3100`. Ignored offline. If you set `--live-url` without `--loki-url`, no logs are pushed (agent sees whatever is already in Loki). |
+| `--merge` | flag; default off | After `--only` / `--limit`, **combine** the remaining cases into **one** request: logs are round-robin interleaved then shuffled (`--merge-seed`), metrics deep-merged, alert becomes generic `HighErrorRate`. Scores per-system hit rate (a cause counts if its keywords appear in primary **or** secondary). Needs ≥2 cases. |
+| `--merge-seed N` | int; default `42` | RNG seed for the shuffle step when `--merge` is set (reproducible mixed samples). |
 
 ### Mode selection
 
@@ -161,6 +163,32 @@ python eval/run_blind_eval.py \
   --loki-url http://localhost:3100 \
   --judge
 ```
+
+**`--merge` — mixed concurrent errors in one request (realistic Loki sample):**
+
+Default blind eval runs **one case per request**, so the model never has to
+disentangle overlapping failures. Production samples are mixed. `--merge`
+interleaves the selected cases into a single offline prompt or live `/alert`:
+
+```bash
+# Offline mixed: postgres + redis + JVM in one diagnosis
+python eval/run_blind_eval.py \
+  --merge --only postgres-connectivity,redis-connection,jvm-heap-oom \
+  --judge
+
+# Live mixed (push interleaved logs, one HighErrorRate alert)
+python eval/run_blind_eval.py \
+  --merge --only postgres-connectivity,redis-connection,openai-rate-limit \
+  --live-url http://localhost:8001 --loki-url http://localhost:3100 \
+  --judge
+
+# Reproducible shuffle
+python eval/run_blind_eval.py --merge --merge-seed 7 --limit 4
+```
+
+Scores report `systems_hit / systems_total` and a `per_system` breakdown (a
+system counts as a hit when its `cause_keywords` appear anywhere in the
+diagnosis text pool, not only the primary hypothesis).
 
 **PowerShell equivalents:**
 
@@ -308,7 +336,9 @@ from `false` to `true`).
 
 ## Metrics reported
 
-- `identified_accuracy` — primary hypothesis named the right system/cause.
+- `identified_accuracy` — primary hypothesis named the right system/cause
+  (for `--merge`: all source systems hit in the diagnosis text pool).
+- `mean_systems_hit_rate` — with `--merge`: fraction of concurrent causes found.
 - `mean_keyword_recall` — coverage of expected cause keywords across the diagnosis.
 - `grounded` (per case) — evidence cited provided log tokens (anti-hallucination).
 - `confidence_note` — the model's self-reported confidence (calibration).

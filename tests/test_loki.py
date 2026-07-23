@@ -48,3 +48,58 @@ def test_format_log_entries_batch():
     assert len(out) == 1
     assert "[trace_id=t1]" in out[0]
     assert "S3HealthIndicator:" in out[0]
+
+
+def test_query_range_sorts_newest_first_across_streams(monkeypatch):
+    """Loki streams arrive unordered; sample[:N] must still be newest lines."""
+
+    class _FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "result": [
+                        {
+                            "stream": {"service": "platform-service"},
+                            "values": [
+                                ["100", "older-health-noise"],
+                                ["200", "mid-health-noise"],
+                            ],
+                        },
+                        {
+                            "stream": {"service": "platform-service", "blind_eval": "x"},
+                            "values": [
+                                ["300", "newest-injected"],
+                                ["250", "newer-injected"],
+                            ],
+                        },
+                    ]
+                }
+            }
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, *args, **kwargs):
+            return _FakeResp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    client = LokiClient("http://loki:3100")
+    entries = client.query_range('{service="platform-service"}', limit=10)
+    assert [line for _ts, line in entries] == [
+        "newest-injected",
+        "newer-injected",
+        "mid-health-noise",
+        "older-health-noise",
+    ]

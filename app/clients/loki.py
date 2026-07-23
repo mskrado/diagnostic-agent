@@ -48,6 +48,9 @@ class LokiClient:
         for stream in streams:
             for ts_ns, line in stream.get("values", []):
                 entries.append((ts_ns, line))
+        # Loki returns streams in arbitrary order; callers take [:N] as the
+        # "newest" sample, so sort globally by timestamp (newest first).
+        entries.sort(key=lambda pair: int(pair[0]), reverse=True)
         return entries
 
     @staticmethod
