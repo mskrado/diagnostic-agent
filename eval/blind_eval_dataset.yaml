@@ -150,20 +150,55 @@ cases:
       must_reference: ["429", retry-after]
       root_cause: "The AI module is being rate-limited by OpenAI (HTTP 429, retry-after). AI-assisted features fail or slow; other modules are unaffected. External dependency throttling, not an internal bug."
 
-  - id: disk-pressure
-    system: host-disk
+  - id: smtp-connection-failures
+    system: smtp
     alert:
-      alertname: HostDiskSpaceLow
+      alertname: SmtpConnectionFailures
       service: platform-service
       severity: warning
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-20T20:14:05.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef012345","message":"Free disk space below threshold: path=/var/lib/docker free=1.2GB total=40GB (3%); writes may fail"}'
-      - '{"@timestamp":"2026-07-20T20:14:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef0123456","message":"could not write to file: No space left on device"}'
+      - '{"@timestamp":"2026-07-24T05:43:50.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"a1b2c3d4e5f6789012345678abcdef01","message":"Failed to send template email to: user@example.com"}'
+      - '{"@timestamp":"2026-07-24T05:43:50.110Z","level":"ERROR","logger_name":"org.springframework.mail.MailSendException","service":"platform-service","trace_id":"a1b2c3d4e5f6789012345678abcdef01","message":"Mail server connection failed; nested exception is jakarta.mail.MessagingException: Could not connect to SMTP host: smtp-relay.gmail.com, port: 465; nested exception is java.net.ConnectException: Connection timed out"}'
+      - '{"@timestamp":"2026-07-24T05:43:52.220Z","level":"ERROR","logger_name":"com.publishi.notification.config.AsyncConfig","service":"platform-service","trace_id":"b2c3d4e5f6789012345678abcdef0123","message":"Async exception in method sendTemplate: SMTP send failed: 535 5.7.8 Authentication credentials invalid — check stored SMTP password / SETTINGS_ENCRYPTION_KEY"}'
     expected:
-      cause_keywords: [disk, space, filesystem, storage]
-      must_reference: ["No space left on device", "3%"]
-      root_cause: "The host filesystem is nearly full (3% free); writes are failing with 'No space left on device'. Root cause is host disk exhaustion affecting all write-heavy services."
+      cause_keywords: [smtp, email, mail, relay, authentication]
+      must_reference: ["Could not connect to SMTP", "535"]
+      root_cause: "Outbound SMTP to the configured relay is failing (connect timeout and/or 535 auth). MFA PIN and other notification emails do not reach users even though login may still return MFA_REQUIRED."
+
+  - id: smtp-mailpit-fallback
+    system: smtp-mailpit-fallback
+    alert:
+      alertname: SmtpMailpitFallback
+      service: platform-service
+      severity: critical
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-19T15:16:04.854Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=smtp-relay.gmail.com, port=465, tls=true"}'
+      - '{"@timestamp":"2026-07-19T15:16:04.855Z","level":"WARN","logger_name":"com.publishi.platform.settings.service.SystemSettingsService","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Failed to apply DB email settings to mail sender: Cannot invoke \"org.springframework.mail.javamail.JavaMailSenderImpl.setHost(String)\" because \"sender\" is null"}'
+      - '{"@timestamp":"2026-07-19T15:16:05.010Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=mailpit, port=1025, tls=false"}'
+      - '{"@timestamp":"2026-07-24T05:43:43.200Z","level":"INFO","logger_name":"com.publishi.auth.service.AuthService","service":"platform-service","trace_id":"d4e5f6789012345678abcdef01234567","message":"MFA challenge initiated for user: admin@example.com (tenant: 00000000-0000-0000-0000-000000000000)"}'
+    expected:
+      cause_keywords: [mailpit, mail sender, smtp, email settings, fallback]
+      must_reference: ["Failed to apply DB email settings", mailpit]
+      root_cause: "Admin/DB SMTP settings failed to apply at startup (JavaMailSender null during rebuild), so the live mailer stayed on the compose default mailpit:1025. MFA challenges are created but PIN emails never reach real user inboxes."
+
+  - id: disk-pressure
+    system: host-disk
+    alert:
+      alertname: HostDiskSpaceCritical
+      service: platform-service
+      severity: critical
+    metrics: {}
+    logs:
+      - '{"@timestamp":"2026-07-24T05:40:00.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef0123456789012345678901","message":"Free disk space below threshold: path=/var/lib/docker free=20K total=30G (0%); writes may fail"}'
+      - '{"@timestamp":"2026-07-24T05:40:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef01234567890123456789012","message":"could not write to file: No space left on device"}'
+      - '{"@timestamp":"2026-07-24T05:41:00.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"89abcdef01234567890123456789013","message":"Failed to send template email to: user@example.com; nested exception is java.io.IOException: No space left on device"}'
+      - '{"@timestamp":"2026-07-24T05:41:30.000Z","level":"ERROR","logger_name":"com.github.dockerjava.api.async.ResultCallbackTemplate","service":"platform-service","trace_id":"9abcdef01234567890123456789014","message":"OCI runtime exec failed: open /tmp/runc-process: no space left on device: unknown"}'
+    expected:
+      cause_keywords: [disk, space, filesystem, storage, enospc]
+      must_reference: ["No space left on device", "0%"]
+      root_cause: "The host root filesystem is exhausted (0% free / ENOSPC). Docker exec fails, container logs corrupt, and async email sends fail — cascading outage including MFA PIN delivery."
 
   # --- Adversarial / harder cases (no obvious keyword; tests real reasoning) ---
 
