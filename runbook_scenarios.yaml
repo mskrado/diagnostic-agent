@@ -106,17 +106,47 @@ scenarios:
 
   - id: smtp-delivery-failures
     runbook: runbook-smtp-delivery-failures.md
-    description: Outbound SMTP / email delivery failures
+    description: Outbound SMTP umbrella (points at connection + mailpit fallback)
     labels:
-      alertname: ExternalApiErrorsInLogs
-      service: platform-service
+      alertname: SmtpConnectionFailures
+      service: smtp
       severity: warning
       module: notification
     annotations:
-      summary: Synthetic SMTP delivery failures for runbook E2E
-    rag_query: SmtpDeliveryFailures smtp MailSend MessagingException email
+      summary: Synthetic SMTP delivery umbrella for runbook E2E
+    rag_query: SmtpDeliveryFailures smtp MailSend MessagingException email notification
     rag_must_contain:
       - smtp
+
+  - id: smtp-connection-failures
+    runbook: runbook-smtp-connection-failures.md
+    description: SMTP relay connect / auth / delivery failures
+    labels:
+      alertname: SmtpConnectionFailures
+      service: smtp
+      severity: warning
+      module: notification
+    annotations:
+      summary: Synthetic SmtpConnectionFailures for runbook E2E
+    rag_query: SmtpConnectionFailures Could not connect to SMTP MailSendException 535 MessagingException
+    rag_must_contain:
+      - smtp
+      - connect
+
+  - id: smtp-mailpit-fallback
+    runbook: runbook-smtp-mailpit-fallback.md
+    description: DB SMTP settings fail to apply; live mailer stuck on Mailpit
+    labels:
+      alertname: SmtpMailpitFallback
+      service: smtp
+      severity: critical
+      module: notification
+    annotations:
+      summary: Synthetic SmtpMailpitFallback for runbook E2E
+    rag_query: SmtpMailpitFallback Failed to apply DB email settings mail sender null host=mailpit
+    rag_must_contain:
+      - mailpit
+      - mail sender
 
   - id: twilio-sms-failures
     runbook: runbook-twilio-sms-failures.md
@@ -134,17 +164,18 @@ scenarios:
 
   - id: host-disk-pressure
     runbook: runbook-host-disk-pressure.md
-    description: Host filesystem running low (node_exporter)
+    description: Host filesystem running low (node_exporter) / ENOSPC cascade
     labels:
-      alertname: HostDiskSpaceLow
+      alertname: HostDiskSpaceCritical
       service: host
-      severity: warning
+      severity: critical
     annotations:
-      summary: Synthetic HostDiskSpaceLow for runbook E2E
-    rag_query: HostDiskSpaceLow node filesystem disk space low
+      summary: Synthetic HostDiskSpaceCritical for runbook E2E
+    rag_query: HostDiskSpaceCritical HostDiskSpaceLow ENOSPC No space left on device docker filesystem
     rag_must_contain:
       - disk
       - filesystem
+      - space
 
   - id: container-restart-loop
     runbook: runbook-container-restart-loop.md
