@@ -1,0 +1,38 @@
+# Spring Boot Micrometer metrics (http_server_requests_seconds_*, hikaricp_*, jvm_*).
+extends: null
+
+service_kinds:
+  - gateway
+  - monolith
+  - unknown
+
+service_metrics:
+  - error_rate
+  - request_rate
+  - latency_p99
+  - service_up
+  - jvm_heap_used_ratio
+
+always_collect:
+  - db_pool_pending
+
+templates:
+  error_rate: >-
+    sum(rate(http_server_requests_seconds_count{{service="{service}",status=~"5.."}}[{window}]))
+    / clamp_min(sum(rate(http_server_requests_seconds_count{{service="{service}"}}[{window}])), 0.001)
+  request_rate: >-
+    sum(rate(http_server_requests_seconds_count{{service="{service}"}}[{window}]))
+  latency_p99: >-
+    histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{{service="{service}"}}[{window}])))
+  latency_p95: >-
+    histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{{service="{service}"}}[{window}])))
+  service_up: 'up{{service="{service}"}}'
+  db_pool_pending: 'hikaricp_connections_pending{{service="{service}"}}'
+  db_pool_active: 'hikaricp_connections_active{{service="{service}"}}'
+  jvm_heap_used_ratio: >-
+    sum(jvm_memory_used_bytes{{service="{service}",area="heap"}})
+    / clamp_min(sum(jvm_memory_max_bytes{{service="{service}",area="heap"}}), 1)
+
+dependency_probes:
+  database: db_pool_pending
+  redis: 'lettuce_command_completion_seconds_count{{service="{service}"}}'

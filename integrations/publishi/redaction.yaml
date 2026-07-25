@@ -1,0 +1,24 @@
+# publishi.ai tenant-safety redaction (extends generic secret scrubbing).
+extends: generic-prometheus
+
+rules:
+  - name: tenant_kv
+    pattern: '("?tenant[_-]?id"?\s*[:=]\s*")[^"]*(")'
+    replacement: '\1[REDACTED]\2'
+    flags: IGNORECASE
+  - name: tenant_token
+    pattern: '\btenant-[0-9a-zA-Z]+\b'
+    replacement: 'tenant-[REDACTED]'
+    flags: IGNORECASE
+  - name: uuid
+    pattern: '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
+    replacement: '[UUID-REDACTED]'
+    flags: IGNORECASE
+  - name: bearer_token
+    pattern: '(?i)(bearer\s+)[a-z0-9._\-]+'
+    replacement: '\1[REDACTED]'
+    flags: IGNORECASE
+  - name: aws_access_key
+    pattern: '\bAKIA[0-9A-Z]{16}\b'
+    replacement: '[AWS-KEY-REDACTED]'
+    flags: ""

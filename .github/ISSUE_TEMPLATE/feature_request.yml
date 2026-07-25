@@ -1,0 +1,19 @@
+name: Feature / use case
+description: Propose a new diagnostic capability or profile enhancement
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What failure mode should the agent diagnose better?
+    validations:
+      required: true
+  - type: checkboxes
+    id: corpus
+    attributes:
+      label: Contribution plan
+      options:
+        - label: I can provide a runbook
+        - label: I can provide a blind-eval case (synthetic logs)
+        - label: I can provide a runbook_scenarios.yaml entry

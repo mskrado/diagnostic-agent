@@ -21,13 +21,22 @@ from ..config import settings
 from ..dependency_map import DependencyMap
 from ..llm import content_to_text, invoke_structured_diagnosis
 from ..llm_usage import extract_token_usage
+from ..profile import get_profile
 from ..rag.store import RagStore
-from .prompts import SYSTEM_PROMPT
+from .prompts import build_system_prompt
 from .state import DiagnosticState
 
 logger = logging.getLogger(__name__)
 
-_MODULE_RE = re.compile(r"c\.p\.([a-z]+)")
+
+def _module_regex() -> re.Pattern[str] | None:
+    raw = get_profile().logs.module_regex
+    if not raw:
+        return None
+    try:
+        return re.compile(raw)
+    except re.error:
+        return None
 
 
 class DiagnosticNodes:
@@ -74,28 +83,41 @@ class DiagnosticNodes:
         dependencies = self.dep_map.neighbours(service)
         blast_radius = self.dep_map.blast_radius(service)
 
+        metrics = get_profile().metrics
         prom_data: dict = {}
         for svc in [service] + dependencies:
             snapshot: dict = {}
             kind = self.dep_map.kind(svc)
-            if kind in ("gateway", "monolith", "unknown"):
-                snapshot["error_rate"] = self.prom.instant(promql.error_rate(svc, window))
-                snapshot["request_rate"] = self.prom.instant(promql.request_rate(svc, window))
-                snapshot["latency_p99"] = self.prom.instant(promql.latency_p99(svc, window))
-                snapshot["up"] = self.prom.instant(promql.service_up(svc))
-                snapshot["heap_used_ratio"] = self.prom.instant(
-                    promql.jvm_heap_used_ratio(svc)
-                )
-            probe = promql.DEPENDENCY_PROBES.get(kind)
-            if probe is not None:
-                snapshot[f"{kind}_probe"] = self.prom.instant(probe(service))
+            if kind in metrics.service_kinds:
+                for metric_name in metrics.service_metrics:
+                    try:
+                        query = metrics.render(metric_name, service=svc, window=window)
+                    except Exception:  # noqa: BLE001
+                        query = None
+                    if not query:
+                        continue
+                    # Keep stable snapshot keys used by email/eval.
+                    key = "up" if metric_name == "service_up" else metric_name
+                    if metric_name == "jvm_heap_used_ratio":
+                        key = "heap_used_ratio"
+                    snapshot[key] = self.prom.instant(query)
+            probe_q = promql.dependency_probe(kind, service, window)
+            if probe_q is not None:
+                snapshot[f"{kind}_probe"] = self.prom.instant(probe_q)
             prom_data[svc] = {k: v for k, v in snapshot.items() if v is not None}
 
-        # Module-aware DB pool signal (drives the most common incident type).
+        # Always-collect metrics on the alerted service (e.g. db_pool_pending).
         prom_data.setdefault(service, {})
-        pending = self.prom.instant(promql.db_pool_pending(service))
-        if pending is not None:
-            prom_data[service]["db_pool_pending"] = pending
+        for metric_name in metrics.always_collect:
+            try:
+                query = metrics.render(metric_name, service=service, window=window)
+            except Exception:  # noqa: BLE001
+                query = None
+            if not query:
+                continue
+            value = self.prom.instant(query)
+            if value is not None:
+                prom_data[service][metric_name] = value
 
         # Logs for the alert target. Logical labels (security, postgres, …)
         # map to real Loki streams via service_map; alert-specific line filters
@@ -129,9 +151,10 @@ class DiagnosticNodes:
 
         # Refine module hint from logs if not provided on the alert.
         module_hint = state.get("module_hint", "")
-        if not module_hint:
+        module_re = _module_regex()
+        if not module_hint and module_re is not None:
             for _ts, line in raw_entries[:50]:
-                m = _MODULE_RE.search(line)
+                m = module_re.search(line)
                 if m:
                     module_hint = m.group(1)
                     break
@@ -183,11 +206,12 @@ class DiagnosticNodes:
         )
         raw = ""
         token_usage = extract_token_usage(None)
+        system_prompt = build_system_prompt()
         try:
             result = invoke_structured_diagnosis(
                 self.llm,
                 [
-                    SystemMessage(content=SYSTEM_PROMPT),
+                    SystemMessage(content=system_prompt),
                     HumanMessage(content=user_content),
                 ],
             )
@@ -227,7 +251,7 @@ class DiagnosticNodes:
             **state,
             "hypotheses": hypotheses,
             "llm_raw": raw,
-            "llm_system_prompt": SYSTEM_PROMPT,
+            "llm_system_prompt": system_prompt,
             "llm_user_prompt": user_content,
             "llm_token_usage": token_usage,
         }
@@ -253,7 +277,8 @@ class DiagnosticNodes:
             "models": settings.model_snapshot(),
             # Full prompts + tokens for RAG effectiveness / cost (also in audit JSONL).
             "llm_exchange": {
-                "system_prompt": state.get("llm_system_prompt") or SYSTEM_PROMPT,
+                "system_prompt": state.get("llm_system_prompt")
+                or build_system_prompt(),
                 "user_prompt": state.get("llm_user_prompt") or "",
                 "rag_context": rag_ctx,
                 "rag_used": bool(rag_ctx),

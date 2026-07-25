@@ -1,0 +1,10 @@
+extends: generic-prometheus
+
+service_label: service
+level_filter: "ERROR|WARN"
+use_json_parser: true
+module_regex: null
+
+alert_line_filters:
+  PostgresErrorsInLogs: "(?i)(postgres|jdbc|connection).*(refused|timeout)"
+  RedisErrorsInLogs: "(?i)(redis).*(timeout|refused|connection)"

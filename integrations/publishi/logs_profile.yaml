@@ -1,0 +1,19 @@
+# publishi.ai Loki retrieval — service= label, Spring JSON logs, module hint.
+extends: generic-prometheus
+
+service_label: service
+level_filter: "ERROR|WARN"
+use_json_parser: true
+# logger_name prefix c.p.<module> inside platform-service
+module_regex: 'c\.p\.([a-z]+)'
+
+# Line filters mirrored from infrastructure/docker/loki/loki-alert-rules.yml.
+# When present the agent omits the ERROR|WARN level gate so INFO-level matches
+# that still trip the ruler are included.
+alert_line_filters:
+  SecurityAuthErrorsInLogs: "(?i)(jwt|csrf|access denied|authentication failed|cross-tenant|account locked)"
+  PostgresErrorsInLogs: "(?i)(postgres|jdbc|hikari|connection).*(refused|timeout|exhaust)"
+  RedisErrorsInLogs: "(?i)(redis|lettuce).*(timeout|refused|connection)"
+  ElasticsearchErrorsInLogs: "(?i)(elasticsearch|RestHighLevelClient).*(error|failed|rejected)"
+  ExternalApiErrorsInLogs: "(?i)(openai|smtp|twilio|s3|amazonaws).*(error|failed|timeout|5[0-9][0-9])"
+  FrontendJsErrorSpike: "(?i)(error|exception|TypeError|ReferenceError)"

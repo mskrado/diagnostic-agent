@@ -1,8 +1,10 @@
 """Runtime configuration, sourced from environment variables.
 
-All defaults assume the agent runs inside the `publishi-network` Docker
-network created by the observability overlay, so service DNS names (e.g.
-`prometheus`, `loki`, `grafana`) resolve directly.
+All defaults assume the agent runs inside a Docker network where service DNS
+names (e.g. ``prometheus``, ``loki``, ``grafana``) resolve directly.
+
+Integration into a host project is driven by ``AGENT_PROFILE_DIR`` (an
+integration profile directory). See ``app.profile``.
 """
 from __future__ import annotations
 
@@ -11,10 +13,20 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
+_DEFAULT_PROFILE = _BASE_DIR / "integrations" / "publishi"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_", env_file=".env", extra="ignore")
+
+    # --- Integration profile ---
+    # Directory with service_map.yaml, metrics_profile.yaml, logs_profile.yaml,
+    # redaction.yaml, prompt_profile.yaml (and optional runbooks/).
+    # Empty string disables profile-dir loading (built-in preset only).
+    profile_dir: str = str(_DEFAULT_PROFILE) if _DEFAULT_PROFILE.is_dir() else ""
+    # Built-in preset used when profile files omit a section / for extends chain.
+    # Use "spring-micrometer" for Spring Boot hosts, "generic-prometheus" otherwise.
+    default_preset: str = "spring-micrometer"
 
     # --- Data sources (internal Docker DNS names by default) ---
     prometheus_url: str = "http://prometheus:9090"
@@ -41,7 +53,8 @@ class Settings(BaseSettings):
 
     # --- RAG ---
     rag_enabled: bool = True
-    runbooks_path: str = str(_BASE_DIR / "runbooks")
+    # Empty → resolve from profile (profile/runbooks) then package-root runbooks/.
+    runbooks_path: str = ""
     chroma_path: str = str(_BASE_DIR / "chroma_db")
     # Per-family retrieval + overall cap for mixed-error log samples.
     rag_top_k: int = 2
@@ -59,17 +72,39 @@ class Settings(BaseSettings):
     # SMTP diagnostic email (separate from Alertmanager alert email).
     email_enabled: bool = True
     email_to: str = "dev-alerts@localhost"
-    email_subject_prefix: str = "publishi"
+    email_subject_prefix: str = "diagnostic"
     smtp_host: str = "mailpit"
     smtp_port: int = 1025
-    smtp_from: str = "diagnostic-agent@publishi.local"
+    smtp_from: str = "diagnostic-agent@localhost"
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_starttls: bool = False
     smtp_timeout: float = 15.0
 
     # --- Dependency map ---
-    service_map_path: str = str(_BASE_DIR / "service_map.yaml")
+    # Empty → resolve from profile service_map.yaml then package-root default.
+    service_map_path: str = ""
+
+    def resolved_service_map_path(self) -> str:
+        if self.service_map_path:
+            return self.service_map_path
+        from .profile import get_profile
+
+        profile = get_profile()
+        if profile.service_map_path:
+            return profile.service_map_path
+        fallback = _BASE_DIR / "service_map.yaml"
+        return str(fallback)
+
+    def resolved_runbooks_path(self) -> str:
+        if self.runbooks_path:
+            return self.runbooks_path
+        from .profile import get_profile
+
+        profile = get_profile()
+        if profile.runbooks_path:
+            return profile.runbooks_path
+        return str(_BASE_DIR / "runbooks")
 
     def model_snapshot(self) -> dict[str, str]:
         """Chat + embed providers/models for audit / eval JSON reference."""

@@ -1,36 +1,13 @@
-"""Build Loki LogQL for diagnostic retrieve.
+"""Build Loki LogQL for diagnostic retrieve — driven by logs_profile.yaml.
 
-Alert labels often use *logical* service names (`security`, `postgres`,
-`openai`) while the matching lines are emitted by `platform-service` /
-`api-gateway`. This module maps those labels to real selectors and, when the
-alertname is known, applies the same line filter the Loki ruler uses so the
-email sample matches what fired the alert.
+Alert labels often use *logical* service names while matching lines are emitted
+by other processes. ``service_map.yaml`` maps those labels to real selectors;
+the logs profile supplies the label name, level filter, and optional per-alert
+line filters.
 """
 from __future__ import annotations
 
-# Line filters mirrored from infrastructure/docker/loki/loki-alert-rules.yml.
-# When present we omit the ERROR|WARN level gate so INFO-level matches that
-# still trip the ruler are included (auth anomalies often land as WARN/INFO).
-ALERT_LINE_FILTERS: dict[str, str] = {
-    "SecurityAuthErrorsInLogs": (
-        "(?i)(jwt|csrf|access denied|authentication failed|cross-tenant|account locked)"
-    ),
-    "PostgresErrorsInLogs": (
-        "(?i)(postgres|jdbc|hikari|connection).*(refused|timeout|exhaust)"
-    ),
-    "RedisErrorsInLogs": (
-        "(?i)(redis|lettuce).*(timeout|refused|connection)"
-    ),
-    "ElasticsearchErrorsInLogs": (
-        "(?i)(elasticsearch|RestHighLevelClient).*(error|failed|rejected)"
-    ),
-    "ExternalApiErrorsInLogs": (
-        "(?i)(openai|smtp|twilio|s3|amazonaws).*(error|failed|timeout|5[0-9][0-9])"
-    ),
-    "FrontendJsErrorSpike": (
-        "(?i)(error|exception|TypeError|ReferenceError)"
-    ),
-}
+from .profile import get_profile
 
 
 def stream_selector(
@@ -39,17 +16,18 @@ def stream_selector(
     log_services: list[str] | None = None,
     log_selector: str | None = None,
 ) -> str:
-    """Return a Loki stream selector `{...}` for the alert's service label."""
+    """Return a Loki stream selector ``{...}`` for the alert's service label."""
     if log_selector:
         sel = log_selector.strip()
         if not sel.startswith("{"):
             sel = "{" + sel + "}"
         return sel
+    label = get_profile().logs.service_label
     services = [s for s in (log_services or []) if s] or [service]
     if len(services) == 1:
-        return f'{{service="{services[0]}"}}'
+        return f'{{{label}="{services[0]}"}}'
     joined = "|".join(services)
-    return f'{{service=~"{joined}"}}'
+    return f'{{{label}=~"{joined}"}}'
 
 
 def build_retrieve_logql(
@@ -63,13 +41,14 @@ def build_retrieve_logql(
 
     metadata includes selector, optional line_filter, and level filter used.
     """
+    logs = get_profile().logs
     selector = stream_selector(
         service=service,
         log_services=log_services,
         log_selector=log_selector,
     )
     alert = (alert_type or "").strip()
-    line_filter = ALERT_LINE_FILTERS.get(alert)
+    line_filter = logs.alert_line_filters.get(alert)
     if line_filter:
         logql = f'{selector} |~ "{line_filter}"'
         meta = {
@@ -81,12 +60,22 @@ def build_retrieve_logql(
         }
         return logql, meta
 
-    logql = f'{selector} | json | level=~"ERROR|WARN"'
+    if logs.use_json_parser:
+        logql = f'{selector} | json | level=~"{logs.level_filter}"'
+    else:
+        logql = f'{selector} | level=~"{logs.level_filter}"'
     meta = {
         "selector": selector,
         "line_filter": None,
-        "level": "ERROR|WARN",
+        "level": logs.level_filter,
         "service": service,
         "log_services": log_services or [service],
     }
     return logql, meta
+
+
+# Back-compat for tests / importers that still reference the module constant.
+def __getattr__(name: str):
+    if name == "ALERT_LINE_FILTERS":
+        return dict(get_profile().logs.alert_line_filters)
+    raise AttributeError(name)

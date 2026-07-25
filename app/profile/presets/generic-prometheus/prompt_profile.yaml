@@ -1,0 +1,12 @@
+extends: null
+
+platform_description: >-
+  a generic application stack observed via Prometheus metrics and Loki logs
+
+tool_run_hints: |-
+  Prefer concrete, copy-pasteable commands:
+  - Loki LogQL via curl to http://localhost:3100 (or http://loki:3100 in-network)
+  - Prometheus PromQL via curl to http://localhost:9090
+  - docker / docker compose ps, logs, inspect (suggested human steps only)
+  - curl health checks against the affected service
+  Adapt hostnames and label filters to the alert and this stack's service_map.

@@ -88,7 +88,7 @@ def build_rag_store() -> RagStore:
         logger.warning("RAG deps missing (%s); continuing without RAG", exc)
         return RagStore(None)
 
-    runbooks = settings.runbooks_path
+    runbooks = settings.resolved_runbooks_path()
     if not os.path.isdir(runbooks):
         logger.warning("Runbooks path %s missing; RAG empty", runbooks)
         return RagStore(None)

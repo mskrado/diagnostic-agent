@@ -1,0 +1,33 @@
+# Built-in generic Prometheus metrics profile.
+# Uses the community http_requests_total / classic JVM exporter naming.
+# Placeholders: {service}, {window}
+
+extends: null
+
+service_kinds:
+  - gateway
+  - monolith
+  - http
+  - unknown
+
+service_metrics:
+  - error_rate
+  - request_rate
+  - latency_p99
+  - service_up
+
+always_collect: []
+
+templates:
+  error_rate: >-
+    sum(rate(http_requests_total{{service="{service}",code=~"5.."}}[{window}]))
+    / clamp_min(sum(rate(http_requests_total{{service="{service}"}}[{window}])), 0.001)
+  request_rate: >-
+    sum(rate(http_requests_total{{service="{service}"}}[{window}]))
+  latency_p99: >-
+    histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{{service="{service}"}}[{window}])))
+  latency_p95: >-
+    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{{service="{service}"}}[{window}])))
+  service_up: 'up{{service="{service}"}}'
+
+dependency_probes: {}

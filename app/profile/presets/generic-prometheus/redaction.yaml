@@ -1,0 +1,13 @@
+# Minimal redaction — scrub common secret-ish tokens. Host profiles should
+# extend this with tenant / PII rules.
+extends: null
+
+rules:
+  - name: bearer_token
+    pattern: '(?i)(bearer\s+)[a-z0-9._\-]+'
+    replacement: '\1[REDACTED]'
+    flags: IGNORECASE
+  - name: aws_access_key
+    pattern: '\bAKIA[0-9A-Z]{16}\b'
+    replacement: '[AWS-KEY-REDACTED]'
+    flags: ""

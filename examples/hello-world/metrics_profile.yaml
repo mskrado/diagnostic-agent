@@ -1,0 +1,2 @@
+# Use the built-in generic Prometheus metric names.
+extends: generic-prometheus

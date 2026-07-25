@@ -29,3 +29,7 @@ open* point to `runbook-postgres-connectivity.md` instead.
 
 ## Past incident reference
 See `incident-2025-03-11-pool-exhaustion.md`.
+
+## Hypotheses-only
+This runbook supports surfacing hypotheses. Do NOT auto-remediate; a human
+confirms and acts.

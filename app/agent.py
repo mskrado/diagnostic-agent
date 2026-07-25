@@ -29,7 +29,7 @@ class DiagnosticAgent:
         self.prom = PrometheusClient(settings.prometheus_url)
         self.loki = LokiClient(settings.loki_url)
         self.grafana = GrafanaClient(settings.grafana_url, settings.grafana_token)
-        self.dep_map = get_dependency_map(settings.service_map_path)
+        self.dep_map = get_dependency_map(settings.resolved_service_map_path())
         self.rag = build_rag_store()
         self.llm = get_structured_diagnosis_llm()
         self.nodes = DiagnosticNodes(

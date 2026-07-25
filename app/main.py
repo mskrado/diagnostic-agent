@@ -41,17 +41,21 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="publishi.ai diagnostic agent", lifespan=lifespan)
+app = FastAPI(title="diagnostic-agent", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health():
     from .config import settings
+    from .profile import get_profile
 
+    profile = get_profile()
     body = {
         "status": "ok",
         "agent_initialized": _agent is not None,
         "models": settings.model_snapshot(),
+        "profile": profile.name,
+        "preset": settings.default_preset,
     }
     if _agent is not None:
         body["rag_available"] = bool(getattr(_agent.rag, "available", False))

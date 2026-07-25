@@ -1,0 +1,12 @@
+extends: generic-prometheus
+
+platform_description: >-
+  a simple 3-tier web application (api → app → postgres/redis) observed via
+  Prometheus and Loki
+
+tool_run_hints: |-
+  Prefer copy-pasteable curls against Prometheus (:9090) and Loki (:3100):
+  - curl -sG 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={service="app"} |~ "(?i)error"'
+  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=up{service="app"}'
+  - docker compose ps api app postgres redis
+  - curl -sf http://localhost:8080/health

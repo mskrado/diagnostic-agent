@@ -1,70 +1,85 @@
-"""PromQL builders for publishi.ai.
+"""PromQL builders driven by the active integration profile.
 
-IMPORTANT: publishi.ai exposes Spring Boot Micrometer metrics, NOT the generic
-`http_requests_total` from the reference design. The relevant series are:
-
-  - http_server_requests_seconds_count{service=..,status=..,uri=..}
-  - http_server_requests_seconds_bucket{service=..,le=..}
-  - hikaricp_connections_*            (DB pool, via HikariCP)
-  - jvm_memory_used_bytes / jvm_memory_max_bytes
-  - up{job=..}
-
-The `service` label is attached by Micrometer (`management.metrics.tags.application`)
-and Prometheus relabeling (`service: api-gateway` / `service: platform-service`).
+Templates live in ``metrics_profile.yaml`` (or a built-in preset such as
+``spring-micrometer`` / ``generic-prometheus``). Placeholders: ``{service}``,
+``{window}``.
 """
 from __future__ import annotations
+
+from ..profile import get_profile
+
+
+def _render(name: str, service: str, window: str = "5m") -> str:
+    profile = get_profile().metrics
+    out = profile.render(name, service=service, window=window)
+    if out is None:
+        raise KeyError(f"metrics profile has no template named {name!r}")
+    return out
 
 
 def error_rate(service: str, window: str = "5m") -> str:
     """Fraction of 5xx responses for a service over the window (0..1)."""
-    return (
-        f'sum(rate(http_server_requests_seconds_count{{service="{service}",status=~"5.."}}[{window}]))'
-        f' / clamp_min(sum(rate(http_server_requests_seconds_count{{service="{service}"}}[{window}])), 0.001)'
-    )
+    return _render("error_rate", service, window)
 
 
 def request_rate(service: str, window: str = "5m") -> str:
-    return f'sum(rate(http_server_requests_seconds_count{{service="{service}"}}[{window}]))'
+    return _render("request_rate", service, window)
 
 
 def latency_p99(service: str, window: str = "5m") -> str:
-    return (
-        "histogram_quantile(0.99, sum by (le) ("
-        f'rate(http_server_requests_seconds_bucket{{service="{service}"}}[{window}])))'
-    )
+    return _render("latency_p99", service, window)
 
 
 def latency_p95(service: str, window: str = "5m") -> str:
-    return (
-        "histogram_quantile(0.95, sum by (le) ("
-        f'rate(http_server_requests_seconds_bucket{{service="{service}"}}[{window}])))'
-    )
+    return _render("latency_p95", service, window)
 
 
 def service_up(service: str) -> str:
-    return f'up{{service="{service}"}}'
+    return _render("service_up", service)
 
 
 def db_pool_pending(service: str) -> str:
-    """Threads waiting on a HikariCP connection -- a pool-exhaustion signal."""
-    return f'hikaricp_connections_pending{{service="{service}"}}'
+    """Threads waiting on a DB pool connection — a pool-exhaustion signal."""
+    return _render("db_pool_pending", service)
 
 
 def db_pool_active(service: str) -> str:
-    return f'hikaricp_connections_active{{service="{service}"}}'
+    return _render("db_pool_active", service)
 
 
 def jvm_heap_used_ratio(service: str) -> str:
-    return (
-        f'sum(jvm_memory_used_bytes{{service="{service}",area="heap"}})'
-        f' / clamp_min(sum(jvm_memory_max_bytes{{service="{service}",area="heap"}}), 1)'
-    )
+    return _render("jvm_heap_used_ratio", service)
 
 
-# Dependency-specific probes keyed by the `kind` field in service_map.yaml.
-# Each returns a PromQL string given the owning service. Missing exporters
-# simply yield empty results (handled gracefully downstream).
-DEPENDENCY_PROBES: dict[str, callable] = {
-    "database": db_pool_pending,
-    "redis": lambda svc: f'lettuce_command_completion_seconds_count{{service="{svc}"}}',
-}
+def dependency_probe(kind: str, service: str, window: str = "5m") -> str | None:
+    """Return PromQL for a dependency kind, or None if the profile has no probe."""
+    return get_profile().metrics.probe_for_kind(kind, service=service, window=window)
+
+
+def service_kinds() -> tuple[str, ...]:
+    return get_profile().metrics.service_kinds
+
+
+def service_metric_names() -> tuple[str, ...]:
+    return get_profile().metrics.service_metrics
+
+
+def always_collect_names() -> tuple[str, ...]:
+    return get_profile().metrics.always_collect
+
+
+# Back-compat alias: older code imported DEPENDENCY_PROBES as a dict of callables.
+# Prefer dependency_probe() for new code.
+def _legacy_probe(kind: str):
+    def _fn(svc: str, window: str = "5m") -> str | None:
+        return dependency_probe(kind, svc, window)
+
+    return _fn
+
+
+# Populated lazily via __getattr__ so tests that poke DEPENDENCY_PROBES still work.
+def __getattr__(name: str):
+    if name == "DEPENDENCY_PROBES":
+        probes = get_profile().metrics.dependency_probes
+        return {kind: _legacy_probe(kind) for kind in probes}
+    raise AttributeError(name)

@@ -1,0 +1,29 @@
+# Minimal 3-tier topology for the hello-world example.
+services:
+  api:
+    kind: http
+    upstream: []
+    downstream: [app]
+    description: "Edge / reverse proxy"
+
+  app:
+    kind: monolith
+    upstream: [api]
+    downstream: [postgres, redis]
+    description: "Application service"
+
+  postgres:
+    kind: database
+    upstream: [app]
+    downstream: []
+    log_services: [app]
+    description: "Primary database"
+
+  redis:
+    kind: redis
+    upstream: [app]
+    downstream: []
+    log_services: [app]
+    description: "Cache / sessions"
+
+module_dependencies: {}

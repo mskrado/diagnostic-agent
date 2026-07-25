@@ -1,0 +1,8 @@
+# Generic Loki log retrieval defaults.
+extends: null
+
+service_label: service
+level_filter: "ERROR|WARN"
+use_json_parser: true
+module_regex: null
+alert_line_filters: {}

@@ -1,20 +1,20 @@
 """System prompt for the correlation node.
 
-Constraints baked in for NIST-aligned, hallucination-resistant operation:
-  - structured JSON output only
-  - never auto-remediate (the agent does not run fixes itself)
-  - every claim must cite specific metric values or log lines it was given
-  - expect MULTIPLE concurrent problems; categorize and assess each separately
-  - include copy-pasteable tool-run examples and human fix suggestions
-"""
+Core invariants (JSON contract, multi-cause reasoning, no auto-remediation,
+evidence grounding) live here and are NOT overridable by a host profile.
 
-SYSTEM_PROMPT = """You are a diagnostic agent for the publishi.ai platform
-(a Spring Boot modular monolith `platform-service` behind an `api-gateway`,
-with backing dependencies: postgres, redis, elasticsearch, s3, openai, smtp, twilio).
+Host-specific ``platform_description`` and ``tool_run_hints`` come from
+``prompt_profile.yaml`` via the active integration profile.
+"""
+from __future__ import annotations
+
+from ..profile import get_profile
+
+_CORE_TEMPLATE = """You are a diagnostic agent for {platform_description}.
 
 You receive:
 - Prometheus metrics for the affected service and its dependencies
-- Recent error logs from Loki (Spring Boot JSON)
+- Recent error logs from Loki
 - Relevant runbook / past-incident context (may be empty)
 - A dependency/blast-radius map
 
@@ -41,9 +41,9 @@ methodically:
    one-line secondary cause.
 
 Produce ONLY a JSON object with exactly this shape:
-{
+{{
   "issue_categories": [
-    {
+    {{
       "category": "...",
       "cause": "...",
       "confidence": 0-100,
@@ -51,16 +51,16 @@ Produce ONLY a JSON object with exactly this shape:
       "suggested_next_step": "...",
       "tool_run_examples": ["...", "..."],
       "fix_suggestions": ["...", "..."]
-    }
+    }}
   ],
-  "primary_hypothesis": {"cause": "...", "confidence": 0-100, "evidence": "..."},
-  "secondary_hypotheses": [{"cause": "...", "confidence": 0-100}],
+  "primary_hypothesis": {{"cause": "...", "confidence": 0-100, "evidence": "..."}},
+  "secondary_hypotheses": [{{"cause": "...", "confidence": 0-100}}],
   "blast_radius_assessment": "...",
   "suggested_next_steps": ["...", "..."],
   "tool_run_examples": ["...", "..."],
   "fix_suggestions": ["...", "..."],
   "confidence_note": "low|medium|high"
-}
+}}
 
 Rules:
 - "issue_categories" is the SOURCE OF TRUTH. It MUST contain one FULL entry for
@@ -84,21 +84,7 @@ Rules:
 - "suggested_next_step" / "suggested_next_steps" are short investigative actions
   (what to look at first).
 - "tool_run_examples" MUST be concrete, copy-pasteable commands tailored to this
-  stack (prefer the publishi Docker Compose DEV topology). Include at least 1–3
-  examples on EVERY category, and 2–5 at the top level covering the whole
-  incident (not only the primary). Prefer real tool names:
-  - Loki LogQL via curl to http://localhost:3100 (or http://loki:3100 in-network)
-  - Prometheus PromQL via curl to http://localhost:9090
-  - docker / docker compose ps, logs, inspect, restart (only as a *suggested*
-    human step, never as something you performed)
-  - curl health/actuator checks (e.g. platform-service :8080, gateway :8000)
-  - psql / redis-cli only when the failure clearly involves those systems
-  Example shapes (adapt hostnames/filters to the actual alert/category):
-  - curl -sG 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={service=\"platform-service\"} |~ \"(?i)postgres|PSQLException\"' | head
-  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_pending'
-  - docker compose ps postgres platform-service
-  - docker logs publishi-postgres --tail 100
-  - curl -sf http://localhost:8080/actuator/health
+  stack. {tool_run_hints}
 - "fix_suggestions" MUST be specific, ordered human remediation steps that
   address the likely root cause for THAT category (config/env mismatch, restart
   dependency, restore connectivity, rotate secret, raise pool size, free disk,
@@ -112,3 +98,24 @@ Rules:
   overall (often a union or prioritization of the per-category lists), not
   replace missing per-category guidance.
 """
+
+
+def build_system_prompt(
+    *,
+    platform_description: str | None = None,
+    tool_run_hints: str | None = None,
+) -> str:
+    """Assemble the system prompt from core invariants + profile context."""
+    prompt = get_profile().prompt
+    return _CORE_TEMPLATE.format(
+        platform_description=platform_description or prompt.platform_description,
+        tool_run_hints=tool_run_hints or prompt.tool_run_hints,
+    )
+
+
+def __getattr__(name: str):
+    # Lazy so importing this module before Settings/profile init still works,
+    # and so tests that read SYSTEM_PROMPT see the active profile.
+    if name == "SYSTEM_PROMPT":
+        return build_system_prompt()
+    raise AttributeError(name)

@@ -2,7 +2,9 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    AGENT_PROFILE_DIR=/app/integrations/publishi \
+    AGENT_DEFAULT_PRESET=spring-micrometer
 
 WORKDIR /app
 
@@ -10,10 +12,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# App code + runtime assets.
+# App code + runtime assets (presets ship inside app/profile/presets).
 COPY app/ ./app/
+COPY integrations/ ./integrations/
 COPY service_map.yaml ./service_map.yaml
 COPY runbooks/ ./runbooks/
+COPY pyproject.toml ./pyproject.toml
 
 # Read-only service account; runs unprivileged.
 RUN useradd --create-home --uid 10001 agent \

@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a defect in the agent core or a profile
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: describe
+    attributes:
+      label: Description
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Profile used, alert payload, relevant logs (redacted)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit

@@ -1,0 +1,23 @@
+extends: generic-prometheus
+
+platform_description: >-
+  the publishi.ai platform (a Spring Boot modular monolith `platform-service`
+  behind an `api-gateway`, with backing dependencies: postgres, redis,
+  elasticsearch, s3, openai, smtp, twilio)
+
+tool_run_hints: |-
+  Prefer the publishi Docker Compose DEV topology. Include at least 1–3
+  examples on EVERY category, and 2–5 at the top level covering the whole
+  incident (not only the primary). Prefer real tool names:
+  - Loki LogQL via curl to http://localhost:3100 (or http://loki:3100 in-network)
+  - Prometheus PromQL via curl to http://localhost:9090
+  - docker / docker compose ps, logs, inspect, restart (only as a *suggested*
+    human step, never as something you performed)
+  - curl health/actuator checks (e.g. platform-service :8080, gateway :8000)
+  - psql / redis-cli only when the failure clearly involves those systems
+  Example shapes (adapt hostnames/filters to the actual alert/category):
+  - curl -sG 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={service="platform-service"} |~ "(?i)postgres|PSQLException"' | head
+  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_pending'
+  - docker compose ps postgres platform-service
+  - docker logs publishi-postgres --tail 100
+  - curl -sf http://localhost:8080/actuator/health
