@@ -16,6 +16,12 @@ class DependencyMap:
 
     @classmethod
     def load(cls, path: str) -> "DependencyMap":
+        if not path:
+            logger.info(
+                "No service_map.yaml in the active profile; running with an empty "
+                "dependency map (blast radius will be empty)"
+            )
+            return cls({})
         try:
             with open(path, encoding="utf-8") as f:
                 return cls(yaml.safe_load(f) or {})

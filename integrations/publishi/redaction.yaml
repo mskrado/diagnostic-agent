@@ -1,4 +1,7 @@
-# publishi.ai tenant-safety redaction (extends generic secret scrubbing).
+# publishi.ai tenant-safety redaction.
+#
+# `extends` pulls in the base preset's secret scrubbing (bearer tokens, AWS
+# keys); rules below are appended. Reuse a parent rule's `name` to override it.
 extends: generic-prometheus
 
 rules:
@@ -14,11 +17,3 @@ rules:
     pattern: '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
     replacement: '[UUID-REDACTED]'
     flags: IGNORECASE
-  - name: bearer_token
-    pattern: '(?i)(bearer\s+)[a-z0-9._\-]+'
-    replacement: '\1[REDACTED]'
-    flags: IGNORECASE
-  - name: aws_access_key
-    pattern: '\bAKIA[0-9A-Z]{16}\b'
-    replacement: '[AWS-KEY-REDACTED]'
-    flags: ""

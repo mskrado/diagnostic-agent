@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# Packaging build artifacts (`pip install -e .`, `pip wheel .`)
+*.egg-info/
+build/
+dist/
 chroma_db/
 audit/
 eval/results/

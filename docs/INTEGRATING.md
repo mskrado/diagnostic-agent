@@ -44,7 +44,9 @@ services:
 module_dependencies: {}
 ```
 
-`kind` selects which PromQL probes run (from your metrics profile).
+`kind` selects which PromQL probes run (from your metrics profile). Presets ship
+naming conventions only, so topology always comes from your profile — without a
+`service_map.yaml` the agent runs with an empty dependency map (no blast radius).
 
 ### metrics_profile.yaml
 
@@ -75,12 +77,35 @@ alert_line_filters:
   PostgresErrorsInLogs: "(?i)(postgres|connection).*(refused|timeout)"
 ```
 
-### redaction.yaml / prompt_profile.yaml
+### redaction.yaml
 
-Add regex rules for tenant IDs or secrets. Put a short description of *your*
-platform and copy-pasteable tool hints in `prompt_profile.yaml`. Core safety
-rules (hypotheses-only, evidence grounding, JSON schema) stay in agent code and
-cannot be overridden.
+Rules **accumulate** along the `extends:` chain, so your tenant/PII rules are
+appended to the base preset's secret scrubbing rather than replacing it. Reuse a
+parent rule's `name` to override it.
+
+```yaml
+extends: generic-prometheus   # keeps bearer_token + aws_access_key
+rules:
+  - name: tenant_kv
+    pattern: '("?tenant[_-]?id"?\s*[:=]\s*")[^"]*(")'
+    replacement: '\1[REDACTED]\2'
+    flags: IGNORECASE
+```
+
+Redaction is **fail-closed**: the agent refuses to start when the resolved
+profile has zero rules, so a mis-pointed `AGENT_PROFILE_DIR` cannot silently emit
+raw data. Check the count with `diagnostic-agent health-check` or `GET /health`;
+`AGENT_REQUIRE_REDACTION=false` opts out.
+
+> Never bind-mount a profile directory over one that already exists inside the
+> image. Docker creates an empty directory when the host path is missing, and the
+> empty mount shadows the real profile.
+
+### prompt_profile.yaml
+
+Put a short description of *your* platform and copy-pasteable tool hints here.
+Core safety rules (hypotheses-only, evidence grounding, JSON schema) stay in
+agent code and cannot be overridden.
 
 ## 3. Wire Alertmanager
 
@@ -122,7 +147,9 @@ services:
 
 ```bash
 curl http://localhost:8001/health
-# -> profile, preset, models, rag_available
+# -> {"status":"ok","profile":"my-profile","preset":"generic-prometheus",
+#     "redaction_rules":3,"service_map":true,"models":{...}}
+# "status":"degraded" / "redaction_rules":0 means the profile was not found.
 
 curl -X POST http://localhost:8001/alert -H 'Content-Type: application/json' \
   -d '{"alerts":[{"status":"firing","labels":{"alertname":"HighErrorRate","service":"app","severity":"warning"}}]}'

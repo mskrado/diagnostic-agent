@@ -47,16 +47,23 @@ app = FastAPI(title="diagnostic-agent", lifespan=lifespan)
 @app.get("/health")
 async def health():
     from .config import settings
+    from .delivery.redact import active_rule_names
     from .profile import get_profile
 
     profile = get_profile()
+    rules = active_rule_names()
     body = {
         "status": "ok",
         "agent_initialized": _agent is not None,
         "models": settings.model_snapshot(),
         "profile": profile.name,
         "preset": settings.default_preset,
+        # Surfaced so a mis-mounted profile is visible without reading logs.
+        "redaction_rules": len(rules),
+        "service_map": bool(settings.resolved_service_map_path()),
     }
+    if not rules:
+        body["status"] = "degraded"
     if _agent is not None:
         body["rag_available"] = bool(getattr(_agent.rag, "available", False))
     return body

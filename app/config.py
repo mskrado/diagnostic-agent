@@ -13,7 +13,6 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
-_DEFAULT_PROFILE = _BASE_DIR / "integrations" / "publishi"
 
 
 class Settings(BaseSettings):
@@ -22,11 +21,17 @@ class Settings(BaseSettings):
     # --- Integration profile ---
     # Directory with service_map.yaml, metrics_profile.yaml, logs_profile.yaml,
     # redaction.yaml, prompt_profile.yaml (and optional runbooks/).
-    # Empty string disables profile-dir loading (built-in preset only).
-    profile_dir: str = str(_DEFAULT_PROFILE) if _DEFAULT_PROFILE.is_dir() else ""
+    # Deliberately empty: no host project is the default. Set it per deployment
+    # (compose/.env) — e.g. integrations/publishi for the publishi stack.
+    # Empty means built-in preset only.
+    profile_dir: str = ""
     # Built-in preset used when profile files omit a section / for extends chain.
     # Use "spring-micrometer" for Spring Boot hosts, "generic-prometheus" otherwise.
-    default_preset: str = "spring-micrometer"
+    default_preset: str = "generic-prometheus"
+    # Refuse to start when the resolved profile yields zero redaction rules.
+    # Guards against a misconfigured/empty profile silently shipping tenant data
+    # into reports, audit logs, and Grafana annotations.
+    require_redaction: bool = True
 
     # --- Data sources (internal Docker DNS names by default) ---
     prometheus_url: str = "http://prometheus:9090"
@@ -86,15 +91,12 @@ class Settings(BaseSettings):
     service_map_path: str = ""
 
     def resolved_service_map_path(self) -> str:
+        """Topology file path, or "" when no profile supplies one."""
         if self.service_map_path:
             return self.service_map_path
         from .profile import get_profile
 
-        profile = get_profile()
-        if profile.service_map_path:
-            return profile.service_map_path
-        fallback = _BASE_DIR / "service_map.yaml"
-        return str(fallback)
+        return get_profile().service_map_path or ""
 
     def resolved_runbooks_path(self) -> str:
         if self.runbooks_path:

@@ -4,7 +4,7 @@ extends: null
 
 rules:
   - name: bearer_token
-    pattern: '(?i)(bearer\s+)[a-z0-9._\-]+'
+    pattern: '(bearer\s+)[a-z0-9._\-]+'
     replacement: '\1[REDACTED]'
     flags: IGNORECASE
   - name: aws_access_key

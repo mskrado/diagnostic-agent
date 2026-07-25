@@ -8,7 +8,7 @@
 #   - logical alert targets (security, frontend) whose logs live elsewhere
 #
 # The agent uses this to answer "what else might be broken?" (blast radius).
-# `kind` keys into app/clients/promql.py::DEPENDENCY_PROBES for extra metrics.
+# `kind` keys into `dependency_probes` in the metrics profile for extra metrics.
 #
 # Log retrieval:
 #   - `log_services`: Loki `service=` labels to query (when != alert service)

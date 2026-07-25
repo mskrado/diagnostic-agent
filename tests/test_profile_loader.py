@@ -42,6 +42,50 @@ def test_generic_prometheus_profile_smoke():
     assert q is not None
     assert "http_requests_total" in q
     assert "http_server_requests_seconds_count" not in q
+    # Presets carry conventions, not topology.
+    assert profile.service_map_path is None
+
+
+def test_partial_preset_still_inherits_base_redaction():
+    """A preset that only defines metrics must not zero out redaction.
+
+    Regression: spring-micrometer ships metrics only. Before the base-preset
+    chain root, this resolved to 0 rules and silently disabled redaction.
+    """
+    for preset in list_presets():
+        profile = build_profile(profile_dir=None, default_preset=preset)
+        names = {r.name for r in profile.redaction.rules}
+        assert "bearer_token" in names, f"preset {preset} lost base redaction"
+        assert "aws_access_key" in names, f"preset {preset} lost base redaction"
+
+
+def test_extends_appends_parent_redaction_rules(tmp_path):
+    (tmp_path / "redaction.yaml").write_text(
+        "extends: generic-prometheus\n"
+        "rules:\n"
+        "  - name: my_rule\n"
+        "    pattern: 'secret-[0-9]+'\n"
+        "    replacement: '[X]'\n",
+        encoding="utf-8",
+    )
+    profile = build_profile(profile_dir=tmp_path, default_preset="generic-prometheus")
+    names = [r.name for r in profile.redaction.rules]
+    assert names == ["bearer_token", "aws_access_key", "my_rule"]
+
+
+def test_extends_child_can_override_parent_rule_by_name(tmp_path):
+    (tmp_path / "redaction.yaml").write_text(
+        "extends: generic-prometheus\n"
+        "rules:\n"
+        "  - name: bearer_token\n"
+        "    pattern: 'CUSTOM'\n"
+        "    replacement: '[MINE]'\n",
+        encoding="utf-8",
+    )
+    profile = build_profile(profile_dir=tmp_path, default_preset="generic-prometheus")
+    by_name = {r.name: r for r in profile.redaction.rules}
+    assert by_name["bearer_token"].pattern == "CUSTOM"
+    assert "aws_access_key" in by_name
 
 
 def test_publishi_profile_uses_micrometer_and_tenant_redaction():

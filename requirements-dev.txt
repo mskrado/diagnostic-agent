@@ -1,0 +1,6 @@
+# Test/dev dependencies. Exposed as the `dev` extra via pyproject.toml
+# [tool.setuptools.dynamic], so `pip install -e .[dev]` matches CI.
+pytest>=8.2
+pytest-asyncio>=0.23
+# httpx mocking
+respx>=0.21

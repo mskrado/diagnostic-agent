@@ -1,3 +1,9 @@
+# Runtime dependencies. Single source of truth: pyproject.toml reads this file
+# via [tool.setuptools.dynamic]. Keep comments on their own lines — setuptools
+# does not strip trailing comments from requirement lines.
+#
+# Test/dev dependencies live in requirements-dev.txt.
+
 # --- Core agent stack ---
 langgraph>=0.2
 langchain>=0.3
@@ -5,19 +11,26 @@ langchain-core>=0.3
 langchain-community>=0.3
 
 # --- Pluggable LLM backends (see app/llm.py) ---
-langchain-ollama>=0.2          # ollama (default, on-prem)
-langchain-openai>=0.2          # openai + OpenAI-compatible APIs (DeepSeek, etc.)
-langchain-aws>=0.2             # bedrock_converse + bedrock embeddings
-langchain-anthropic>=0.2       # anthropic
-langchain-google-genai>=2      # google_genai
+# ollama (default, on-prem)
+langchain-ollama>=0.2
+# openai + OpenAI-compatible APIs (DeepSeek, etc.)
+langchain-openai>=0.2
+# bedrock_converse + bedrock embeddings
+langchain-aws>=0.2
+# anthropic
+langchain-anthropic>=0.2
+# google_genai
+langchain-google-genai>=2
 
-# --- RAG / vector store (optional, gated by RAG_ENABLED) ---
+# --- RAG / vector store (optional, gated by AGENT_RAG_ENABLED) ---
 langchain-chroma>=0.1
 chromadb>=0.5
 
 # --- Observability data sources ---
-prometheus-api-client>=0.5     # PromQL against Prometheus HTTP API
-httpx>=0.27                    # async HTTP for Loki + Grafana
+# PromQL against the Prometheus HTTP API
+prometheus-api-client>=0.5
+# async HTTP for Loki + Grafana
+httpx>=0.27
 requests>=2.31
 
 # --- Trigger server + config ---
@@ -26,8 +39,3 @@ uvicorn[standard]>=0.29
 pydantic>=2.7
 pydantic-settings>=2.3
 pyyaml>=6.0
-
-# --- Tests ---
-pytest>=8.2
-pytest-asyncio>=0.23
-respx>=0.21                    # httpx mocking

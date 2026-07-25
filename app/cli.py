@@ -34,15 +34,25 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "health-check":
         from app.config import settings
+        from app.delivery.redact import active_rule_names
         from app.profile import get_profile
 
         profile = get_profile()
+        rules = active_rule_names()
         print(f"profile={profile.name}")
         print(f"preset={settings.default_preset}")
         print(f"profile_dir={settings.profile_dir or '(none)'}")
-        print(f"service_map={settings.resolved_service_map_path()}")
+        print(f"service_map={settings.resolved_service_map_path() or '(none)'}")
         print(f"runbooks={settings.resolved_runbooks_path()}")
+        print(f"redaction={len(rules)} rules {list(rules)}")
         print(f"models={settings.model_snapshot()}")
+        if not rules:
+            print(
+                "ERROR: 0 redaction rules — reports would carry unredacted data. "
+                "The server refuses to start unless AGENT_REQUIRE_REDACTION=false.",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
     return 1

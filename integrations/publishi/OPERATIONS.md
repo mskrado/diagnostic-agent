@@ -1,62 +1,18 @@
-# publishi.ai — Reactive Agentic Diagnostic Tool
+# publishi.ai integration profile — operations
 
-A local-first **LangGraph** agent that runs the moment a Prometheus alert fires.
-On an Alertmanager webhook it pulls **metrics** (Prometheus), **logs** (Loki) and
-**dependency context**, reasons over them with a **local-first LLM**, retrieves
-relevant **runbooks/past incidents** (RAG), and emits a structured diagnostic
-report. **Hypotheses only — no auto-remediation.**
+Operational guide for running the **diagnostic-agent** against publishi.ai. The
+agent itself is a standalone, config-driven project: see the upstream
+[`README.md`](../../README.md) for what it does and
+[`docs/INTEGRATING.md`](../../docs/INTEGRATING.md) for the profile format. This
+file covers only what is specific to *this* profile and the publishi stack.
 
-This is the agentic "brain" on top of publishi.ai's existing Grafana LGTM stack
-(see `docs/architecture/OBSERVABILITY_ARCHITECTURE.md`). It is a separate Python
-sidecar that deploys **only** with the observability overlay; the Java monolith
-is untouched.
+- Profile contents / precedence: [`README.md`](README.md) in this directory
+- Agent System Card (NIST-aligned): `docs/architecture/DIAGNOSTIC_AGENT_SYSTEM_CARD.md`
+- Observability stack it plugs into: `docs/architecture/OBSERVABILITY_ARCHITECTURE.md`
+- **Production deployment (EC2 / ECR / Bedrock): `docs/deployment/DIAGNOSTIC_AGENT_PROD.md`**
 
-## Contents
+## How this profile differs from the generic reference design
 
-- [Architecture (5 layers, adapted to publishi.ai)](#architecture-5-layers-adapted-to-publishiai)
-- [Layout](#layout)
-- [Configuration](#configuration)
-  - [RAG corpus](#rag-corpus)
-- [DEV quickstart (observability overlay)](#dev-quickstart-observability-overlay)
-  - [1. Configure the LLM backend (in the root `.env`)](#1-configure-the-llm-backend-in-the-root-env)
-  - [Grafana annotations (optional, #187)](#grafana-annotations-optional-187)
-  - [Alert email via Mailpit (DEV) — two configurable emails](#alert-email-via-mailpit-dev--two-configurable-emails)
-  - [Where to read outputs (DEV)](#where-to-read-outputs-dev)
-  - [2. Bring up the stack (one command)](#2-bring-up-the-stack-one-command)
-  - [3. (Alternative) fully on-prem with a local LLM](#3-alternative-fully-on-prem-with-a-local-llm)
-  - [4. Verify](#4-verify)
-- [Smoke test (#188)](#smoke-test-188)
-- [Runbook scenario E2E](#runbook-scenario-e2e)
-- [Try it without an alert](#try-it-without-an-alert)
-- [Tests](#tests)
-- [Deploy to production (EC2)](#deploy-to-production-ec2)
-  - [Release the image (devel → main)](#release-the-image-devel--main)
-  - [Run on the EC2 host](#run-on-the-ec2-host)
-  - [Run with AWS Bedrock (no on-host Ollama)](#run-with-aws-bedrock-no-on-host-ollama)
-  - [PROD smoke test](#prod-smoke-test)
-  - [Rollout checklist](#rollout-checklist)
-- [Compliance](#compliance)
-
-## Architecture (5 layers, adapted to publishi.ai)
-
-```
-Prometheus fires alert ──▶ Alertmanager
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-     diagnostic-agent    Mailpit (alert)  Mailpit (diagnostic)
-         webhook           AM email         agent email
-              │
-        FastAPI /alert
-              │
-        LangGraph: detect ─▶ retrieve ─▶ rag_lookup ─▶ correlate ─▶ report
-              │            │              │              │
-        Prometheus +   Chroma RAG    Ollama/OpenAI   audit JSONL
-        Loki + dep map (runbooks)      (JSON)        + Grafana annotation
-                                                      + SMTP diagnostic email
-```
-
-Key adaptations vs. the generic reference design:
 - **Metric names**: Spring Micrometer (`http_server_requests_seconds_*`,
   `hikaricp_connections_*`), not the generic `http_requests_total`.
 - **Loki labels**: `{service=..} | json | level=~"ERROR|WARN"` (Promtail promotes
@@ -65,26 +21,6 @@ Key adaptations vs. the generic reference design:
   mesh — see `service_map.yaml`.
 - **Tenant safety**: tenant identifiers are redacted before any report leaves the
   agent (`app/delivery/redact.py`).
-
-## Layout
-
-```
-diagnostic-agent/
-├── app/
-│   ├── config.py            # env-driven settings (AGENT_* prefix)
-│   ├── llm.py               # pluggable LLM/embeddings (LangChain init_*)
-│   ├── dependency_map.py    # loads service_map.yaml
-│   ├── clients/             # prometheus / loki / grafana + promql builders
-│   ├── rag/store.py         # optional Chroma RAG over runbooks/
-│   ├── graph/               # state, nodes, prompts, graph build
-│   ├── delivery/            # audit JSONL, Grafana annotation, redaction
-│   ├── agent.py             # wires collaborators -> compiled graph
-│   └── main.py              # FastAPI /alert + /health
-├── runbooks/                # RAG corpus (markdown runbooks + post-mortems)
-├── service_map.yaml         # dependency / blast-radius map
-├── tests/                   # pytest unit tests
-└── Dockerfile
-```
 
 ## Configuration
 
@@ -553,10 +489,15 @@ explicitly) when using this path.
 
 ```bash
 curl http://localhost:8001/health
-# -> {"status":"ok","agent_initialized":true}
+# -> {"status":"ok","agent_initialized":true,"profile":"publishi",
+#     "preset":"spring-micrometer","redaction_rules":5,"service_map":true}
 
 docker logs publishi-diagnostic-agent --tail 50   # confirm Prometheus/Loki reachable
 ```
+
+`redaction_rules` must be non-zero and `profile` must be `publishi`. A `0` /
+`"status":"degraded"` means the container is not seeing this profile — the agent
+refuses to start in that state unless `AGENT_REQUIRE_REDACTION=false`.
 
 The agent listens on host port **8001** (`/alert`, `/health`). Alertmanager is
 already wired (`infrastructure/docker/alertmanager/alertmanager-dev.yml`) to POST
@@ -689,203 +630,21 @@ The report is returned in the `/alert` response (direct path only), appended to
 `audit/diagnostics-<date>.jsonl`, emailed when `AGENT_EMAIL_ENABLED=true`, and (if
 a Grafana token is set) posted as a Grafana annotation.
 
-## Tests
-
-```bash
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
-.venv/Scripts/python -m pytest -q
-```
-
 ## Deploy to production (EC2)
 
-In PROD the agent runs as an **observability sidecar** on EC2 from an **ECR
-image** (not a local `build:`), with **Bedrock** (Nova Micro + Titan) as the
-default LLM backend. Two stages: (1) publish the image via the release pipeline,
-(2) run it on the EC2 host. Full reference: `docs/deployment/DIAGNOSTIC_AGENT_PROD.md`.
+PROD runs the agent as an observability sidecar on EC2 from the ECR image
+`publishi/diagnostic-agent:<semver>`, with Bedrock (Nova Micro + Titan) via the
+instance role.
 
-| | DEV (Docker Compose) | PROD (EC2) |
-|---|---|---|
-| Image | local `build: ./diagnostic-agent` | ECR `publishi/diagnostic-agent:<semver>` |
-| LLM backend | Bedrock Nova Micro + Titan (default) | Bedrock Nova Micro + Titan (instance role) |
-| Credentials | `DIAGNOSTIC_AGENT_AWS_*` in root `.env` (not MinIO `AWS_*`) | EC2 instance IAM role |
+The integration profile is **baked into the image**, not bind-mounted: a missing
+host path would become an empty directory, shadow the profile, and disable tenant
+redaction. Rebuild and release the image after editing this profile. Only
+`runbooks/` (the RAG corpus) is mounted from the host.
 
-### Release the image (devel → main)
+Release pipeline, required secrets, Alertmanager routing, audit retention, smoke
+test, and the rollout checklist live in one place:
+**`docs/deployment/DIAGNOSTIC_AGENT_PROD.md`**.
 
-Images are built and pushed to ECR by `.github/workflows/release.yml`, which runs
-on merge to `main`. Follow the issue/branch workflow — feature PRs land on
-`devel`; `main` only receives merges from `devel` behind a Release Checklist
-issue.
-
-```bash
-# 1. Land your change on devel via a normal feature PR (Closes #<issue>).
-# 2. Open the release PR devel -> main:
-gh pr create --base main --head devel \
-  --title "Release: <version> (devel → main)" \
-  --body "Release checklist: #<release-issue>"
-
-# 3. After green CI + review, merge. release.yml computes the next semver,
-#    builds every service (incl. diagnostic-agent), pushes to GHCR + ECR,
-#    deploys to EC2, and tags the release.
-```
-
-To build/push without a merge (coordinate to avoid duplicate deploys):
-
-```bash
-gh workflow run release.yml -f bump=patch     # or minor / major
-```
-
-### Run on the EC2 host
-
-On `/opt/publishi` with `.env` populated from `env.aws.example` (diagnostic +
-alerting keys). **Co-located** observability (default):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.aws.yml \
-  -f docker-compose.observability.yml -f docker-compose.aws-observability.yml \
-  --profile log-collector --profile diagnostic-agent --profile local-llm up -d
-```
-
-First-time Ollama model pull on the host:
-
-```bash
-docker exec publishi-ollama ollama pull mistral:7b-instruct
-docker exec publishi-ollama ollama pull nomic-embed-text
-```
-
-**Split EC2** (dedicated observability host) — run on the *obs* instance:
-
-```bash
-# .env must include PROD_EC2_PRIVATE_IP=<prod-private-ip>
-./scripts/render-remote-obs-config.sh
-
-docker compose \
-  -f docker-compose.observability-remote.yml \
-  -f docker-compose.aws-observability-remote.yml \
-  --profile diagnostic-agent --profile local-llm up -d
-# or from a workstation: ./scripts/ec2-deploy-obs.sh <OBS_EC2_PUBLIC_IP>
-```
-
-### Run with AWS Bedrock (no on-host Ollama)
-
-Recommended PROD path when you don't want to host models on the EC2 instance.
-Bedrock serves both chat (Converse API) and embeddings, so you **omit**
-`--profile local-llm` entirely — no Ollama container, no model pulls, less RAM.
-
-**1. Confirm models are usable in your region.** Bedrock’s **Model access** console
-page is retired. Serverless foundation models are **auto-enabled on first
-invoke** in each commercial region — you do not request access in the UI.
-Governance is IAM / SCPs only.
-
-Still do this once before relying on PROD:
-
-- Pick models in **Bedrock → Model catalog** (chat + embeddings) in `AWS_REGION`.
-- Optional: smoke them in the **Playground** or with `InvokeModel` / `Converse`.
-- **Anthropic** (our chat model): the first invoke in an account may require
-  submitting a short use-case form; complete that with an admin login before
-  the agent runs, or the first diagnostic call can fail.
-- Titan Embed Text v2 is an Amazon model and normally activates on first invoke
-  with no extra form (subject to IAM).
-
-**2. Grant the EC2 instance role permission.** Attach an IAM policy to the
-instance profile — **no AWS keys in `.env`**; the agent uses the instance role
-via the standard AWS credential chain:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Sid": "DiagnosticAgentBedrockInvoke",
-    "Effect": "Allow",
-    "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-    "Resource": [
-      "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
-      "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
-    ]
-  }]
-}
-```
-
-**3. Set the provider knobs in `/opt/publishi/.env`** (replacing the Ollama
-defaults from `env.aws.example`):
-
-```bash
-DIAGNOSTIC_AGENT_CHAT_PROVIDER=bedrock_converse
-# Haiku on Bedrock is ...-v1:0 (not v2). Prefer an inference profile if Converse rejects the FM id:
-#   us.anthropic.claude-3-5-haiku-20241022-v1:0
-DIAGNOSTIC_AGENT_CHAT_MODEL=anthropic.claude-3-5-haiku-20241022-v1:0
-DIAGNOSTIC_AGENT_EMBED_PROVIDER=bedrock
-DIAGNOSTIC_AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0
-DIAGNOSTIC_AGENT_CHAT_MODEL_KWARGS={"region_name":"us-east-1"}
-DIAGNOSTIC_AGENT_EMBED_MODEL_KWARGS={"region_name":"us-east-1"}
-AWS_REGION=us-east-1
-# No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — the instance role supplies creds.
-```
-
-**4. Bring up the stack without `local-llm`** (co-located shown; drop the two
-observability overlays for the split-EC2 obs host as above):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.aws.yml \
-  -f docker-compose.observability.yml -f docker-compose.aws-observability.yml \
-  --profile log-collector --profile diagnostic-agent up -d
-```
-
-**5. Chroma dimension caveat.** Titan v2 embeddings are **1024-dim** vs Ollama
-`nomic-embed-text` **768-dim**. If the host previously ran with Ollama
-embeddings, the persisted Chroma store has the old dimension and queries will
-fail or mismatch — wipe the volume so the agent rebuilds it from `runbooks/`:
-
-```bash
-docker volume ls | grep chroma          # find the prefixed name
-docker compose ... stop diagnostic-agent
-docker volume rm <project>_diagnostic_agent_chroma
-docker compose ... up -d --force-recreate diagnostic-agent
-```
-
-Verify the active backend in the logs:
-
-```bash
-docker logs publishi-diagnostic-agent 2>&1 | grep -E "Chat model:|Embeddings:|RAG store built"
-# -> Chat model: provider=bedrock_converse model=amazon.nova-micro-v1:0
-#    Embeddings: provider=bedrock model=amazon.titan-embed-text-v2:0
-```
-
-> Bedrock config background and the equivalent DEV walkthrough live in
-> [Example A](#example-a--aws-bedrock-devprod-default-nova-micro--titan).
-
-Alertmanager Slack/PagerDuty secrets are **files** (no env expansion) — create
-them on the host before starting, or Alertmanager will not boot:
-
-```bash
-printf '%s' '<slack-webhook-url>'    > infrastructure/docker/alertmanager/secrets/slack_url
-printf '%s' '<pagerduty-routing-key>' > infrastructure/docker/alertmanager/secrets/pagerduty_key
-chmod 600 infrastructure/docker/alertmanager/secrets/*
-```
-
-### PROD smoke test
-
-From a workstation with an SSH tunnel to the agent (obs host in split mode):
-
-```powershell
-ssh -L 8001:127.0.0.1:8001 ec2-user@<EC2_HOST>
-./scripts/diagnostic-agent-smoke-test.ps1 -AgentUrl http://localhost:8001
-```
-
-Expect: `/health` 200, synthetic alert accepted, audit line written, Grafana
-annotation when a token is configured.
-
-### Rollout checklist
-
-- [ ] ECR image published via `release.yml` (or `deploy-ec2-manual.sh`)
-- [ ] **LLM backend ready:** Ollama models pulled on EC2, **or** Bedrock IAM
-      (`bedrock:InvokeModel`) on the instance role + Anthropic use-case accepted
-      if this is the account’s first Anthropic invoke
-- [ ] `.env` populated from `env.aws.example` (diagnostic + alerting keys); for
-      Bedrock, provider knobs set to `bedrock_converse`/`bedrock` + `AWS_REGION`
-- [ ] Chroma volume wiped if the embedding model/dimension changed
-- [ ] Alertmanager `slack_url` / `pagerduty_key` secret files present
-- [ ] Stack up with `diagnostic-agent` profile (`+ local-llm` only for Ollama)
-- [ ] Fire a test alert or run the smoke script; confirm Slack/PagerDuty routes
 
 ## Compliance
 

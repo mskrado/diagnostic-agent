@@ -21,16 +21,27 @@ from .models import LogsProfile, MetricsProfile, PromptProfile, RedactionProfile
 
 logger = logging.getLogger(__name__)
 
-_PKG_ROOT = Path(__file__).resolve().parent.parent.parent
 _PRESETS_DIR = Path(__file__).resolve().parent / "presets"
 
-_PROFILE_FILES = (
-    "metrics_profile.yaml",
-    "logs_profile.yaml",
-    "redaction.yaml",
-    "prompt_profile.yaml",
-    "service_map.yaml",
-)
+# Every preset chain is rooted here so a partial preset (e.g. spring-micrometer,
+# which only defines metrics) can never resolve a section to nothing. Without
+# this, redaction silently becomes a no-op — see tests/test_profile_loader.py.
+_BASE_PRESET = "generic-prometheus"
+
+# Profile section -> filename within a profile directory / preset.
+_SECTION_FILES = {
+    "metrics": "metrics_profile.yaml",
+    "logs": "logs_profile.yaml",
+    "redaction": "redaction.yaml",
+    "prompt": "prompt_profile.yaml",
+    "service_map": "service_map.yaml",
+}
+
+# Lists that accumulate across an `extends:` chain instead of being replaced.
+# Redaction rules are additive by nature: a host profile adds tenant/PII rules on
+# top of the base secret scrubbing rather than discarding it. Entries are keyed
+# by `name`, so a child can still override a parent rule by reusing its name.
+_ADDITIVE_LIST_KEYS = {"rules"}
 
 
 @dataclass(frozen=True)
@@ -59,14 +70,45 @@ def _read_yaml(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _merge_named_list(
+    base: list[Any], overlay: list[Any]
+) -> list[Any]:
+    """Append overlay entries to base, overriding same-`name` dict entries."""
+    merged = [copy.deepcopy(item) for item in base]
+    index = {
+        item["name"]: pos
+        for pos, item in enumerate(merged)
+        if isinstance(item, dict) and "name" in item
+    }
+    for item in overlay:
+        name = item.get("name") if isinstance(item, dict) else None
+        if name is not None and name in index:
+            merged[index[name]] = copy.deepcopy(item)
+        else:
+            if name is not None:
+                index[name] = len(merged)
+            merged.append(copy.deepcopy(item))
+    return merged
+
+
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge overlay onto base; lists/scalars in overlay replace."""
+    """Recursively merge overlay onto base.
+
+    Scalars and most lists in overlay replace the base value. Lists named in
+    ``_ADDITIVE_LIST_KEYS`` accumulate instead (see that constant).
+    """
     out = copy.deepcopy(base)
     for key, val in overlay.items():
         if key == "extends":
             continue
         if isinstance(val, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], val)
+        elif (
+            key in _ADDITIVE_LIST_KEYS
+            and isinstance(val, list)
+            and isinstance(out.get(key), list)
+        ):
+            out[key] = _merge_named_list(out[key], val)
         else:
             out[key] = copy.deepcopy(val)
     return out
@@ -85,14 +127,7 @@ def load_preset(name: str) -> dict[str, dict[str, Any]]:
         logger.warning("Unknown preset %r (available: %s)", name, list_presets())
         return {}
     result: dict[str, dict[str, Any]] = {}
-    mapping = {
-        "metrics": "metrics_profile.yaml",
-        "logs": "logs_profile.yaml",
-        "redaction": "redaction.yaml",
-        "prompt": "prompt_profile.yaml",
-        "service_map": "service_map.yaml",
-    }
-    for key, filename in mapping.items():
+    for key, filename in _SECTION_FILES.items():
         data = _read_yaml(preset_dir / filename)
         if data:
             result[key] = data
@@ -103,9 +138,9 @@ def _resolve_section(
     section: str,
     profile_data: dict[str, Any],
     *,
-    default_preset: str = "generic-prometheus",
+    default_preset: str = _BASE_PRESET,
 ) -> dict[str, Any]:
-    """Merge preset chain then overlay profile section data."""
+    """Merge the preset chain (rooted at _BASE_PRESET) then overlay profile data."""
     extends = profile_data.get("extends") or default_preset
     chain: list[str] = []
     seen: set[str] = set()
@@ -117,6 +152,10 @@ def _resolve_section(
         parent = (preset.get(section) or {}).get("extends")
         current = parent if isinstance(parent, str) else None
 
+    # Always resolve the base preset first so partial presets inherit the rest.
+    if _BASE_PRESET not in seen:
+        chain.append(_BASE_PRESET)
+
     merged: dict[str, Any] = {}
     for name in reversed(chain):
         preset_section = load_preset(name).get(section) or {}
@@ -127,15 +166,8 @@ def _resolve_section(
 def _load_profile_dir(profile_dir: Path | None) -> dict[str, dict[str, Any]]:
     if profile_dir is None or not profile_dir.is_dir():
         return {}
-    mapping = {
-        "metrics": "metrics_profile.yaml",
-        "logs": "logs_profile.yaml",
-        "redaction": "redaction.yaml",
-        "prompt": "prompt_profile.yaml",
-        "service_map": "service_map.yaml",
-    }
     out: dict[str, dict[str, Any]] = {}
-    for key, filename in mapping.items():
+    for key, filename in _SECTION_FILES.items():
         data = _read_yaml(profile_dir / filename)
         if data:
             out[key] = data
@@ -145,7 +177,7 @@ def _load_profile_dir(profile_dir: Path | None) -> dict[str, dict[str, Any]]:
 def build_profile(
     *,
     profile_dir: str | Path | None = None,
-    default_preset: str = "generic-prometheus",
+    default_preset: str = _BASE_PRESET,
     service_map_override: str | None = None,
     runbooks_override: str | None = None,
 ) -> IntegrationProfile:
@@ -179,16 +211,14 @@ def build_profile(
         "prompt", file_data.get("prompt") or {}, default_preset=default_preset
     )
 
-    # service_map: prefer explicit override, then profile file, then preset, else None
+    # service_map: explicit override, else the profile's own file. Topology is
+    # deployment-specific, so presets deliberately do NOT ship one; without a
+    # profile the agent runs with an empty dependency map (no blast radius).
     service_map_path: str | None = service_map_override
     if not service_map_path and root is not None:
         candidate = root / "service_map.yaml"
         if candidate.is_file():
             service_map_path = str(candidate)
-    if not service_map_path:
-        preset_map = _PRESETS_DIR / default_preset / "service_map.yaml"
-        if preset_map.is_file():
-            service_map_path = str(preset_map)
 
     runbooks_path: str | None = runbooks_override
     if not runbooks_path and root is not None:

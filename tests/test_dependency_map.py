@@ -2,7 +2,9 @@ import os
 
 from app.dependency_map import DependencyMap
 
-_MAP_PATH = os.path.join(os.path.dirname(__file__), "..", "service_map.yaml")
+_MAP_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "integrations", "publishi", "service_map.yaml"
+)
 
 
 def _load():

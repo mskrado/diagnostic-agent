@@ -1,12 +1,3 @@
+# Hello-world keeps only the base preset's secret scrubbing.
+# Add tenant / PII rules here; `extends` appends them to the base rules.
 extends: generic-prometheus
-
-# Hello-world keeps the generic secret scrubbing; add PII rules here as needed.
-rules:
-  - name: bearer_token
-    pattern: '(?i)(bearer\s+)[a-z0-9._\-]+'
-    replacement: '\1[REDACTED]'
-    flags: IGNORECASE
-  - name: aws_access_key
-    pattern: '\bAKIA[0-9A-Z]{16}\b'
-    replacement: '[AWS-KEY-REDACTED]'
-    flags: ""

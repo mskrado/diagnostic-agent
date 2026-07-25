@@ -15,6 +15,7 @@ from .config import settings
 from .delivery.annotation import deliver_annotation
 from .delivery.audit import write_audit_record
 from .delivery.email import deliver_email
+from .delivery.redact import active_rule_names
 from .dependency_map import get_dependency_map
 from .graph.build import build_diagnostic_graph
 from .graph.nodes import DiagnosticNodes
@@ -24,8 +25,29 @@ from .rag.store import build_rag_store
 logger = logging.getLogger(__name__)
 
 
+def _check_redaction() -> tuple[str, ...]:
+    """Fail fast when the active profile resolves to no redaction rules.
+
+    An empty/mis-mounted profile dir used to silently disable redaction, sending
+    raw tenant identifiers into reports, audit records, and annotations. Set
+    AGENT_REQUIRE_REDACTION=false to accept that risk deliberately.
+    """
+    names = active_rule_names()
+    if names:
+        return names
+    message = (
+        "Active integration profile resolved 0 redaction rules — reports would "
+        "carry unredacted data. Check AGENT_PROFILE_DIR / redaction.yaml."
+    )
+    if settings.require_redaction:
+        raise RuntimeError(f"{message} Set AGENT_REQUIRE_REDACTION=false to override.")
+    logger.error("%s Continuing because AGENT_REQUIRE_REDACTION=false.", message)
+    return names
+
+
 class DiagnosticAgent:
     def __init__(self):
+        self.redaction_rules = _check_redaction()
         self.prom = PrometheusClient(settings.prometheus_url)
         self.loki = LokiClient(settings.loki_url)
         self.grafana = GrafanaClient(settings.grafana_url, settings.grafana_token)
@@ -37,12 +59,14 @@ class DiagnosticAgent:
         )
         self.graph = build_diagnostic_graph(self.nodes)
         logger.info(
-            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s)",
+            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s, "
+            "redaction=%d rules)",
             settings.chat_provider,
             settings.chat_model,
             self.rag.available,
             self.grafana.enabled,
             settings.email_enabled,
+            len(self.redaction_rules),
         )
 
     def diagnose(self, alert: dict) -> dict:

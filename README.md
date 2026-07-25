@@ -70,8 +70,23 @@ Config precedence: **env vars > profile files > built-in presets**.
 
 Built-in presets (shipped in-package):
 
-- `generic-prometheus` — community `http_requests_total` naming
+- `generic-prometheus` — community `http_requests_total` naming. Every preset
+  chain is rooted here, so a partial preset can never resolve a section to nothing.
 - `spring-micrometer` — Spring Boot Micrometer (`http_server_requests_seconds_*`, HikariCP, JVM)
+
+Presets carry naming conventions, not topology: `service_map.yaml` comes from
+your profile only.
+
+### Redaction is fail-closed
+
+`redaction.yaml` rules **accumulate** across an `extends:` chain — declare
+`extends: generic-prometheus` and your rules are appended to the base secret
+scrubbing. Reuse a parent rule's `name` to override it.
+
+The agent refuses to start when the resolved profile has zero redaction rules,
+so a mis-pointed `AGENT_PROFILE_DIR` fails loudly instead of quietly emitting raw
+data. `diagnostic-agent health-check` and `GET /health` both report the count.
+Set `AGENT_REQUIRE_REDACTION=false` to opt out deliberately.
 
 Reference integrations:
 
@@ -97,8 +112,9 @@ All settings use the `AGENT_` prefix (see `.env.example`).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AGENT_PROFILE_DIR` | *(package default / empty)* | Path to integration profile |
+| `AGENT_PROFILE_DIR` | *(empty)* | Path to integration profile |
 | `AGENT_DEFAULT_PRESET` | `spring-micrometer` | Built-in preset for `extends:` chains |
+| `AGENT_REQUIRE_REDACTION` | `true` | Refuse to start with zero redaction rules |
 | `AGENT_PROMETHEUS_URL` | `http://prometheus:9090` | |
 | `AGENT_LOKI_URL` | `http://loki:3100` | |
 | `AGENT_CHAT_PROVIDER` / `AGENT_CHAT_MODEL` | ollama / mistral | Any LangChain provider |
@@ -111,10 +127,14 @@ All settings use the `AGENT_` prefix (see `.env.example`).
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt   # Windows
-# pip install -r requirements.txt               # Unix
+.venv/Scripts/pip install -e ".[dev]"   # Windows
+# pip install -e ".[dev]"               # Unix
 pytest -q
 ```
+
+`pyproject.toml` reads its dependency lists from `requirements.txt` (runtime) and
+`requirements-dev.txt` (tests), so `pip install -r` and `pip install .[dev]`
+cannot drift apart.
 
 Blind LLM eval (optional): `python eval/run_blind_eval.py` — see `eval/README.md`.
 

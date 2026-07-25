@@ -59,11 +59,16 @@ class MetricsProfile:
                 continue
             if isinstance(val, str):
                 templates.setdefault(key, val)
+        def _list(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+            # `key: []` means "none", which must not fall through to the default.
+            value = data.get(key)
+            return default if value is None else tuple(value)
+
         return cls(
             templates=templates,
-            service_kinds=tuple(data.get("service_kinds") or cls.service_kinds),
-            service_metrics=tuple(data.get("service_metrics") or cls.service_metrics),
-            always_collect=tuple(data.get("always_collect") or cls.always_collect),
+            service_kinds=_list("service_kinds", cls.service_kinds),
+            service_metrics=_list("service_metrics", cls.service_metrics),
+            always_collect=_list("always_collect", cls.always_collect),
             dependency_probes=dict(data.get("dependency_probes") or {}),
             extends=data.get("extends"),
         )

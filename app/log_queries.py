@@ -72,10 +72,3 @@ def build_retrieve_logql(
         "log_services": log_services or [service],
     }
     return logql, meta
-
-
-# Back-compat for tests / importers that still reference the module constant.
-def __getattr__(name: str):
-    if name == "ALERT_LINE_FILTERS":
-        return dict(get_profile().logs.alert_line_filters)
-    raise AttributeError(name)
