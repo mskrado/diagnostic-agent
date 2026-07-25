@@ -1,28 +1,42 @@
 # Integrating diagnostic-agent into your project
 
 This guide shows how to wire the agent into an existing stack **without
-modifying agent code**. You only supply an **integration profile** and
-environment variables.
+modifying agent code**. You supply a **workspace** — configuration and content
+in your own repository — and the published agent does the rest.
 
 ## 1. Choose a distribution
 
 | Option | When to use |
 |---|---|
 | **Docker image** (`ghcr.io/mskrado/diagnostic-agent`) | Sidecar next to Prometheus / Loki / Alertmanager |
-| **pip package** (`pip install diagnostic-agent`) | Embed in a Python host or run `diagnostic-agent serve` |
+| **pip package** (`pip install diagnostic-agent`) | Embed in a Python host or run `diag serve` |
 
-## 2. Create an integration profile
+## 2. Create a workspace
 
-Copy `examples/hello-world/` and edit:
+Copy `examples/hello-world/` into your repository and edit:
 
 ```text
-my-profile/
+infrastructure/diagnostic-agent/
+  agent.yaml             # schema, pinned agent version, preset
   service_map.yaml       # your services + dependencies
   metrics_profile.yaml   # extends: generic-prometheus | spring-micrometer
   logs_profile.yaml      # Loki label + optional alert line filters
   redaction.yaml         # tenant / PII scrubbing
   prompt_profile.yaml    # how the LLM should describe your stack
-  runbooks/              # optional markdown playbooks for RAG
+  runbooks/              # markdown playbooks for RAG
+  scenarios.yaml         # alert -> runbook pairs, for `diag lint` / `diag e2e`
+  blind_eval.yaml        # synthetic cases for `diag eval blind`
+```
+
+Larger hosts move the five profile YAMLs into a `profile/` subdirectory. Both
+layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the manifest
+reference and precedence rules.
+
+```yaml
+# agent.yaml
+schema: 1
+agent_version: 0.1.0
+extends: generic-prometheus
 ```
 
 ### service_map.yaml
@@ -93,13 +107,13 @@ rules:
 ```
 
 Redaction is **fail-closed**: the agent refuses to start when the resolved
-profile has zero rules, so a mis-pointed `AGENT_PROFILE_DIR` cannot silently emit
-raw data. Check the count with `diagnostic-agent health-check` or `GET /health`;
+profile has zero rules, so a mis-pointed workspace cannot silently emit raw
+data. Check the count with `diag validate` or `GET /health`;
 `AGENT_REQUIRE_REDACTION=false` opts out.
 
-> Never bind-mount a profile directory over one that already exists inside the
-> image. Docker creates an empty directory when the host path is missing, and the
-> empty mount shadows the real profile.
+> Docker creates an empty directory when a mount source is missing. The
+> fail-closed guard exists for exactly that case — an empty `/workspace` falls
+> back to preset redaction rather than to none.
 
 ### prompt_profile.yaml
 
@@ -132,31 +146,54 @@ services:
     ports:
       - "8001:8000"
     environment:
-      AGENT_PROFILE_DIR: /profile
-      AGENT_DEFAULT_PRESET: generic-prometheus
       AGENT_PROMETHEUS_URL: http://prometheus:9090
       AGENT_LOKI_URL: http://loki:3100
       AGENT_CHAT_PROVIDER: ${AGENT_CHAT_PROVIDER:-ollama}
       AGENT_CHAT_MODEL: ${AGENT_CHAT_MODEL:-mistral:7b-instruct}
       AGENT_RAG_ENABLED: "true"
     volumes:
-      - ./my-profile:/profile:ro
+      - ./infrastructure/diagnostic-agent:/workspace:ro
 ```
+
+The image sets `AGENT_WORKSPACE=/workspace`, so the mount is the only wiring
+needed — no profile or runbook paths to keep in sync.
 
 ## 5. Verify
 
 ```bash
 curl http://localhost:8001/health
-# -> {"status":"ok","profile":"my-profile","preset":"generic-prometheus",
+# -> {"status":"ok","profile":"diagnostic-agent","preset":"generic-prometheus",
 #     "redaction_rules":3,"service_map":true,"models":{...}}
-# "status":"degraded" / "redaction_rules":0 means the profile was not found.
+# "status":"degraded" / "redaction_rules":0 means the workspace was not found.
 
 curl -X POST http://localhost:8001/alert -H 'Content-Type: application/json' \
   -d '{"alerts":[{"status":"firing","labels":{"alertname":"HighErrorRate","service":"app","severity":"warning"}}]}'
 ```
 
+Then exercise the scenarios end to end:
+
+```bash
+docker compose exec diagnostic-agent diag e2e --url http://localhost:8000
+```
+
+## 6. Guard the workspace in CI
+
+Neither check needs LLM credentials or a running stack, so both belong on every
+pull request that touches the workspace:
+
+```bash
+docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
+  ghcr.io/mskrado/diagnostic-agent:<pinned-tag> \
+  sh -c "diag validate && diag lint"
+```
+
+`validate` checks configuration (manifest schema, profile resolution, redaction
+rule count, topology parse). `lint` checks content (every runbook has a scenario
+and vice versa, blind-eval tokens appear in their logs, runbooks keep the
+hypotheses-only framing).
+
 ## Reference: Spring Boot modular monolith
 
 [`examples/spring-modular-monolith/`](../examples/spring-modular-monolith/) is a
-complete Spring Boot modular-monolith profile (Micrometer metrics, tenant
+complete Spring Boot modular-monolith workspace (Micrometer metrics, tenant
 redaction, gateway + backing stores). Copy it and adapt the YAML for your host.

@@ -34,6 +34,7 @@ Issues = "https://github.com/mskrado/diagnostic-agent/issues"
 Repository = "https://github.com/mskrado/diagnostic-agent"
 
 [project.scripts]
+diag = "app.cli:main"
 diagnostic-agent = "app.cli:main"
 
 [tool.setuptools.packages.find]
@@ -51,6 +52,3 @@ app = [
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = [
-  "e2e: live end-to-end tests against a running agent (set AGENT_E2E_URL)",
-]

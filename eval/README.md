@@ -84,21 +84,21 @@ pushes straight to Loki (faster, no Promtail dependency).
 | File | Purpose |
 |---|---|
 | `blind_eval_dataset.yaml` | Cases: injected logs + independent ground truth per system |
-| `run_blind_eval.py` | Runner (offline + live), scoring, optional LLM-as-judge |
+| `app/tools/blind_eval.py` | Runner (offline + live), scoring, optional LLM-as-judge |
 | `results/` | Timestamped JSON result files (gitignored) |
 
-## CLI parameters (`eval/run_blind_eval.py`)
+## CLI parameters (`app/tools/blind_eval.py`)
 
 Run from `diagnostic-agent/`. Print the same reference from the script:
 
 ```bash
-python eval/run_blind_eval.py -h
+diag eval blind -h
 ```
 
 | Parameter | Type / default | Description |
 |---|---|---|
-| `--dataset PATH` | path; default `eval/blind_eval_dataset.yaml` | YAML file with cases (`logs`, `expected`, alert labels). Use a custom path to trial a subset/fork of cases without editing the main dataset. |
-| `--out DIR` | dir; default `eval/results/` | Where to write `blind-eval-<UTC-timestamp>.json` (summary + per-case diagnosis + scores). Created if missing. Gitignored. |
+| `--dataset PATH` | path; default *the workspace dataset* | YAML file with cases (`logs`, `expected`, alert labels). Use a custom path to trial a subset/fork of cases without editing the main dataset. |
+| `--out DIR` | dir; default `<workspace>/eval-results/` | Where to write `blind-eval-<UTC-timestamp>.json` (summary + per-case diagnosis + scores). Created if missing. Gitignored. |
 | `--only IDS` | string; default *all cases* | Comma-separated case `id` values from the dataset. Filters before `--limit`. Example ids: `jvm-heap-oom`, `postgres-connectivity`, `redis-connection`. |
 | `--limit N` | int; default `0` (no limit) | After `--only` filtering, keep only the first **N** cases. Handy for a quick smoke of the harness. |
 | `--judge` | flag; default off | Extra LLM call per case that grades the **full** diagnosis JSON (`issue_categories`, primary/secondary, next steps, etc.) against known root cause(s). Adds `judge_score` (0–5), `judge_correct`, `judge_reason`, and summary `mean_judge_score` / `judge_correct_rate`. Costs ~1× more LLM calls. |
@@ -121,21 +121,21 @@ python eval/run_blind_eval.py -h
 **Default (all cases, offline, keyword scoring only):**
 
 ```bash
-python eval/run_blind_eval.py
+diag eval blind
 ```
 
 **`--only` — single case or subset:**
 
 ```bash
-python eval/run_blind_eval.py --only jvm-heap-oom
-python eval/run_blind_eval.py --only jvm-heap-oom,redis-connection,postgres-connectivity
+diag eval blind --only jvm-heap-oom
+diag eval blind --only jvm-heap-oom,redis-connection,postgres-connectivity
 ```
 
 **`--limit` — first N cases (after any `--only` filter):**
 
 ```bash
-python eval/run_blind_eval.py --limit 3
-python eval/run_blind_eval.py --only postgres-connectivity,redis-connection,jvm-heap-oom --limit 1
+diag eval blind --limit 3
+diag eval blind --only postgres-connectivity,redis-connection,jvm-heap-oom --limit 1
 # → runs only postgres-connectivity
 ```
 
@@ -146,22 +146,22 @@ Grades the **entire** diagnosis JSON (not primary alone). Causes listed only und
 case; `insufficient-data` controls are excluded from the must-hit checklist.
 
 ```bash
-python eval/run_blind_eval.py --judge
-python eval/run_blind_eval.py --only jvm-heap-oom --judge
+diag eval blind --judge
+diag eval blind --only jvm-heap-oom --judge
 ```
 
 **`--dataset` / `--out` — custom dataset and result location:**
 
 ```bash
-python eval/run_blind_eval.py --dataset eval/blind_eval_dataset.yaml --out eval/results
-python eval/run_blind_eval.py --dataset /tmp/my-cases.yaml --out /tmp/blind-results
+diag eval blind --dataset eval/blind_eval_dataset.yaml --out eval-results
+diag eval blind --dataset /tmp/my-cases.yaml --out /tmp/blind-results
 ```
 
 **`--live-url` / `--loki-url` — full pipeline for one case:**
 
 ```bash
 # Start agent blind first (RAG off), then:
-python eval/run_blind_eval.py \
+diag eval blind \
   --only jvm-heap-oom \
   --live-url http://localhost:8001 \
   --loki-url http://localhost:3100 \
@@ -176,18 +176,18 @@ interleaves the selected cases into a single offline prompt or live `/alert`:
 
 ```bash
 # Offline mixed: postgres + redis + JVM in one diagnosis
-python eval/run_blind_eval.py \
+diag eval blind \
   --merge --only postgres-connectivity,redis-connection,jvm-heap-oom \
   --judge
 
 # Live mixed (push interleaved logs, one HighErrorRate alert)
-python eval/run_blind_eval.py \
+diag eval blind \
   --merge --only postgres-connectivity,redis-connection,openai-rate-limit \
   --live-url http://localhost:8001 --loki-url http://localhost:3100 \
   --judge
 
 # Reproducible shuffle
-python eval/run_blind_eval.py --merge --merge-seed 7 --limit 4
+diag eval blind --merge --merge-seed 7 --limit 4
 ```
 
 Scores report `systems_hit / systems_total` and a `per_system` breakdown (a
@@ -197,8 +197,8 @@ diagnosis text pool, not only the primary hypothesis).
 **PowerShell equivalents:**
 
 ```powershell
-python eval\run_blind_eval.py --only jvm-heap-oom --judge
-python eval\run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100 --only redis-connection
+diag eval blind --only jvm-heap-oom --judge
+diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:3100 --only redis-connection
 ```
 
 ### Related environment variables (not CLI flags)
@@ -216,12 +216,12 @@ These affect the LLM the runner uses (same `AGENT_*` settings as the agent). The
 
 ```bash
 AGENT_CHAT_PROVIDER=openai AGENT_CHAT_MODEL=gpt-4o-mini OPENAI_API_KEY=sk-... \
-  python eval/run_blind_eval.py --only jvm-heap-oom --judge
+  diag eval blind --only jvm-heap-oom --judge
 ```
 
 ```powershell
 $env:AGENT_CHAT_PROVIDER="openai"; $env:AGENT_CHAT_MODEL="gpt-4o-mini"; $env:OPENAI_API_KEY="sk-..."
-python eval\run_blind_eval.py --only jvm-heap-oom --judge
+diag eval blind --only jvm-heap-oom --judge
 ```
 
 ## Run it
@@ -238,26 +238,26 @@ credentials from the standard SDK env vars (`OPENAI_API_KEY`, AWS chain, …).
 cd diagnostic-agent
 
 # 1) Full run, all cases
-python eval/run_blind_eval.py
+diag eval blind
 
 # 2) Add a semantic 0-5 LLM-as-judge score vs the ground-truth root cause
-python eval/run_blind_eval.py --judge
+diag eval blind --judge
 
 # 3) Only specific cases (comma-separated ids from blind_eval_dataset.yaml)
-python eval/run_blind_eval.py --only postgres-connectivity,redis-connection
+diag eval blind --only postgres-connectivity,redis-connection
 
 # 4) Quick sanity run of the first 3 cases
-python eval/run_blind_eval.py --limit 3
+diag eval blind --limit 3
 
 # 5) Point at an alternate dataset / output dir
-python eval/run_blind_eval.py --dataset eval/blind_eval_dataset.yaml --out eval/results
+diag eval blind --dataset eval/blind_eval_dataset.yaml --out eval-results
 ```
 
 PowerShell (Windows) is identical, e.g.:
 
 ```powershell
 cd diagnostic-agent
-python eval\run_blind_eval.py --judge
+diag eval blind --judge
 ```
 
 Force a specific provider for one run without editing `.env`:
@@ -265,13 +265,13 @@ Force a specific provider for one run without editing `.env`:
 ```bash
 # OpenAI
 AGENT_CHAT_PROVIDER=openai AGENT_CHAT_MODEL=gpt-4o-mini OPENAI_API_KEY=sk-... \
-  python eval/run_blind_eval.py --judge
+  diag eval blind --judge
 ```
 
 ```powershell
 # OpenAI (PowerShell)
 $env:AGENT_CHAT_PROVIDER="openai"; $env:AGENT_CHAT_MODEL="gpt-4o-mini"; $env:OPENAI_API_KEY="sk-..."
-python eval\run_blind_eval.py --judge
+diag eval blind --judge
 ```
 
 ### Live (full pipeline: dataset → Loki → agent)
@@ -285,7 +285,7 @@ DIAGNOSTIC_AGENT_RAG_ENABLED=false docker compose -f docker-compose.yml \
   -f docker-compose.observability.yml --profile diagnostic-agent up -d --force-recreate diagnostic-agent
 
 cd diagnostic-agent
-python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
+diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:3100
 ```
 
 The live path records `_rag_used` on each diagnosis so you can confirm the run
@@ -311,12 +311,12 @@ Summary:
   mean_judge_score: 4.1
   judge_correct_rate: 0.818
 
-Wrote eval/results/blind-eval-20260721T0530Z.json
+Wrote eval-results/blind-eval-20260721T0530Z.json
 ```
 
 Each run also writes a full JSON file (per-case diagnosis + **`llm_exchange`**
 with system/user prompts and token usage + score + aggregate) to
-`eval/results/` for later comparison. That folder is gitignored. Offline runs
+`eval-results/` for later comparison. That folder is gitignored. Offline runs
 always have `rag_used=false` and empty `rag_context`; live runs mirror the
 agent's `report.llm_exchange` (so you can confirm RAG-off with `rag_used`).
 
@@ -327,12 +327,12 @@ Run the eval against a RAG-**off** agent, then a RAG-**on** agent, and compare t
 
 ```bash
 # blind (RAG off) — as above
-python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
+diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:3100
 
 # restart the agent with RAG enabled, then re-run
 DIAGNOSTIC_AGENT_RAG_ENABLED=true docker compose -f docker-compose.yml \
   -f docker-compose.observability.yml --profile diagnostic-agent up -d --force-recreate diagnostic-agent
-python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
+diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:3100
 ```
 
 The delta quantifies the runbooks' contribution (and confirms `_rag_used` flips
