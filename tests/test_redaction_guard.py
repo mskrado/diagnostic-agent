@@ -51,7 +51,7 @@ def test_guard_can_be_disabled_explicitly(monkeypatch, empty_profile, caplog):
     assert "0 redaction rules" in caplog.text
 
 
-def test_guard_passes_with_publishi_profile():
+def test_guard_passes_with_spring_example_profile():
     """Default (conftest-pinned) profile satisfies the guard."""
     from app.agent import _check_redaction
 

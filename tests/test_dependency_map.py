@@ -3,7 +3,11 @@ import os
 from app.dependency_map import DependencyMap
 
 _MAP_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "integrations", "publishi", "service_map.yaml"
+    os.path.dirname(__file__),
+    "..",
+    "examples",
+    "spring-modular-monolith",
+    "service_map.yaml",
 )
 
 
@@ -40,5 +44,5 @@ def test_log_services_for_logical_alert_targets():
     assert dm.log_services("security") == ["platform-service", "api-gateway"]
     assert dm.log_services("postgres") == ["platform-service"]
     assert dm.log_services("platform-service") == ["platform-service"]
-    assert dm.log_selector("frontend") == '{app="publishi-frontend"}'
+    assert dm.log_selector("frontend") == '{app="frontend"}'
     assert dm.log_selector("security") is None

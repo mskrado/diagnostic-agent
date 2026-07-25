@@ -155,8 +155,8 @@ curl -X POST http://localhost:8001/alert -H 'Content-Type: application/json' \
   -d '{"alerts":[{"status":"firing","labels":{"alertname":"HighErrorRate","service":"app","severity":"warning"}}]}'
 ```
 
-## Reference: publishi.ai
+## Reference: Spring Boot modular monolith
 
-[`integrations/publishi/`](../integrations/publishi/) is a complete Spring Boot
-modular-monolith profile (Micrometer metrics, tenant redaction, rich runbooks).
-Publishi operations notes: [`integrations/publishi/OPERATIONS.md`](../integrations/publishi/OPERATIONS.md).
+[`examples/spring-modular-monolith/`](../examples/spring-modular-monolith/) is a
+complete Spring Boot modular-monolith profile (Micrometer metrics, tenant
+redaction, gateway + backing stores). Copy it and adapt the YAML for your host.

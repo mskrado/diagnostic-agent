@@ -88,10 +88,10 @@ so a mis-pointed `AGENT_PROFILE_DIR` fails loudly instead of quietly emitting ra
 data. `diagnostic-agent health-check` and `GET /health` both report the count.
 Set `AGENT_REQUIRE_REDACTION=false` to opt out deliberately.
 
-Reference integrations:
+Reference examples:
 
 - [`examples/hello-world/`](examples/hello-world/) — minimal 3-tier app
-- [`integrations/publishi/`](integrations/publishi/) — full Spring Boot modular-monolith example
+- [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) — Spring Boot modular monolith (Micrometer, tenant redaction, rich topology)
 
 See **[docs/INTEGRATING.md](docs/INTEGRATING.md)** for a complete onboarding guide.
 

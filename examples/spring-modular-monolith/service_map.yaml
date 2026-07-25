@@ -1,7 +1,6 @@
-# Service dependency map for publishi.ai.
+# Service dependency map — Spring Boot modular monolith behind an API gateway.
 #
-# publishi.ai is a MODULAR MONOLITH (platform-service) behind an API Gateway,
-# not a microservice mesh. So "upstream/downstream" is modeled as:
+# Topology model (not a microservice mesh):
 #   - process-level edges (gateway -> platform-service)
 #   - backing dependencies (postgres, redis, elasticsearch, s3, openai, ...)
 #   - logical modules inside platform-service (auth, content, media, ...)
@@ -100,7 +99,7 @@ services:
     upstream: []
     downstream: [api-gateway]
     # Faro / browser logs use app= label, not service=.
-    log_selector: '{app="publishi-frontend"}'
+    log_selector: '{app="frontend"}'
     description: "Browser/Faro frontend logs in Loki"
 
 # Maps a logical module (from log logger_name prefix c.p.<module>) to its

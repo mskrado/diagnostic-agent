@@ -1,8 +1,8 @@
 FROM python:3.12-slim
 
 # No project baked in as the default profile: run with the in-package preset
-# unless AGENT_PROFILE_DIR points at one. Bundled profiles under /app/integrations
-# (e.g. /app/integrations/publishi) can be selected without a bind mount, which
+# unless AGENT_PROFILE_DIR points at one. Bundled examples under /app/examples
+# (and optional /app/hosts overlays) can be selected without a bind mount, which
 # matters because Docker turns a missing mount source into an empty directory and
 # that would shadow the profile and disable redaction.
 ENV PYTHONUNBUFFERED=1 \
@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
 
 # App code + runtime assets (presets ship inside app/profile/presets).
 COPY app/ ./app/
-COPY integrations/ ./integrations/
+COPY examples/ ./examples/
+COPY hosts/ ./hosts/
 COPY runbooks/ ./runbooks/
 # pyproject reads its dependency lists from requirements*.txt.
 COPY pyproject.toml requirements-dev.txt ./

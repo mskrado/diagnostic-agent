@@ -9,7 +9,7 @@ from app.profile import build_profile, list_presets, reset_profile_cache
 from app.profile.loader import load_preset
 
 _ROOT = Path(__file__).resolve().parent.parent
-_PUBLISHI = _ROOT / "integrations" / "publishi"
+_SPRING = _ROOT / "examples" / "spring-modular-monolith"
 
 
 @pytest.fixture(autouse=True)
@@ -88,14 +88,14 @@ def test_extends_child_can_override_parent_rule_by_name(tmp_path):
     assert "aws_access_key" in by_name
 
 
-def test_publishi_profile_uses_micrometer_and_tenant_redaction():
-    assert _PUBLISHI.is_dir(), "publishi integration profile missing"
+def test_spring_modular_monolith_uses_micrometer_and_tenant_redaction():
+    assert _SPRING.is_dir(), "spring-modular-monolith example profile missing"
     profile = build_profile(
-        profile_dir=_PUBLISHI,
+        profile_dir=_SPRING,
         default_preset="spring-micrometer",
         runbooks_override=str(_ROOT / "runbooks"),
     )
-    assert profile.name == "publishi"
+    assert profile.name == "spring-modular-monolith"
     q = profile.metrics.render("error_rate", service="platform-service", window="5m")
     assert q is not None
     assert "http_server_requests_seconds_count" in q
@@ -105,15 +105,16 @@ def test_publishi_profile_uses_micrometer_and_tenant_redaction():
     rule_names = {r.name for r in profile.redaction.rules}
     assert "tenant_token" in rule_names
     assert "platform-service" in profile.prompt.platform_description
+    assert "publishi" not in profile.prompt.platform_description.lower()
     assert profile.logs.module_regex
     assert "SecurityAuthErrorsInLogs" in profile.logs.alert_line_filters
     assert profile.service_map_path and Path(profile.service_map_path).is_file()
 
 
-def test_publishi_profile_service_map_resolves_gateway():
+def test_spring_modular_monolith_service_map_resolves_gateway():
     from app.dependency_map import DependencyMap
 
-    profile = build_profile(profile_dir=_PUBLISHI, default_preset="spring-micrometer")
+    profile = build_profile(profile_dir=_SPRING, default_preset="spring-micrometer")
     dep = DependencyMap.load(profile.service_map_path)
     assert "api-gateway" in dep.known_services()
     assert dep.kind("platform-service") == "monolith"

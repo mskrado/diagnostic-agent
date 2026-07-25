@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Directory with service_map.yaml, metrics_profile.yaml, logs_profile.yaml,
     # redaction.yaml, prompt_profile.yaml (and optional runbooks/).
     # Deliberately empty: no host project is the default. Set it per deployment
-    # (compose/.env) — e.g. integrations/publishi for the publishi stack.
+    # (compose/.env) — e.g. examples/spring-modular-monolith for a Spring host.
     # Empty means built-in preset only.
     profile_dir: str = ""
     # Built-in preset used when profile files omit a section / for extends chain.

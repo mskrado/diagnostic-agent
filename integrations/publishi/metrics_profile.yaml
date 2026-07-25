@@ -1,2 +1,0 @@
-# publishi.ai metrics — Spring Boot Micrometer (extends built-in preset).
-extends: spring-micrometer

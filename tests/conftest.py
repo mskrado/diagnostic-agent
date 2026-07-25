@@ -1,21 +1,20 @@
-"""Pytest defaults — pin the publishi integration profile for regression tests.
+"""Pytest defaults — pin the Spring modular-monolith example for regression tests.
 
 Individual tests may override via ``build_profile`` / env + ``reset_profile_cache``.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_PUBLISHI = _ROOT / "integrations" / "publishi"
+_SPRING_EXAMPLE = _ROOT / "examples" / "spring-modular-monolith"
 
 
 @pytest.fixture(autouse=True)
-def _pin_publishi_profile(monkeypatch):
-    monkeypatch.setenv("AGENT_PROFILE_DIR", str(_PUBLISHI))
+def _pin_spring_example_profile(monkeypatch):
+    monkeypatch.setenv("AGENT_PROFILE_DIR", str(_SPRING_EXAMPLE))
     monkeypatch.setenv("AGENT_DEFAULT_PRESET", "spring-micrometer")
     # Clear any empty overrides so profile paths resolve from the profile dir.
     monkeypatch.delenv("AGENT_SERVICE_MAP_PATH", raising=False)

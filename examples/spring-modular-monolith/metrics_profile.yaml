@@ -1,0 +1,2 @@
+# Spring Boot Micrometer metrics (extends the built-in preset).
+extends: spring-micrometer

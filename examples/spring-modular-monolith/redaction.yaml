@@ -1,4 +1,4 @@
-# publishi.ai tenant-safety redaction.
+# Tenant / PII redaction for multi-tenant Spring hosts.
 #
 # `extends` pulls in the base preset's secret scrubbing (bearer tokens, AWS
 # keys); rules below are appended. Reuse a parent rule's `name` to override it.
