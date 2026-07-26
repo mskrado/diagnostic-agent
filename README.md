@@ -14,7 +14,8 @@ and content that live in *your* repository — **not** forking this codebase.
 ## Quick start — install against your stack
 
 Discover running observability tools and generate a complete agent + wiring
-bundle (see [docs/INSTALL.md](docs/INSTALL.md)):
+bundle. Full guide (interactive vs non-interactive, every parameter):  
+**[docs/INSTALL.md](docs/INSTALL.md)**
 
 ```bash
 pip install -e ".[dev]"
