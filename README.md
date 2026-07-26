@@ -11,6 +11,18 @@ a pluggable LLM, and emits a structured diagnostic report.
 Integrating into *any* project means supplying a **workspace** — configuration
 and content that live in *your* repository — **not** forking this codebase.
 
+## Quick start — install against your stack
+
+Discover running observability tools and generate a complete agent + wiring
+bundle. Full guide (interactive vs non-interactive, every parameter):  
+**[docs/INSTALL.md](docs/INSTALL.md)**
+
+```bash
+pip install -e ".[dev]"
+diag install --output ./deploy
+# then follow ./deploy/APPLY.md
+```
+
 ## Quick start (hello-world workspace)
 
 ```bash
