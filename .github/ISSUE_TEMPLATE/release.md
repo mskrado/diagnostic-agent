@@ -2,7 +2,7 @@
 name: Release Checklist
 about: Pre-flight checklist for a devel → main publish (GHCR / PyPI)
 title: "[RELEASE] vX.Y.Z"
-labels: ["type:docs"]
+labels: ["release"]
 ---
 
 **Target version**: vX.Y.Z
