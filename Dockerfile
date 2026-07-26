@@ -10,8 +10,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     AGENT_PROFILE_DIR="" \
-    AGENT_DEFAULT_PRESET=generic-prometheus \
     AGENT_WORKSPACE=/workspace
+# AGENT_DEFAULT_PRESET is deliberately unset: the host workspace's agent.yaml
+# `extends:` supplies it. Baking a value here would override every host.
 
 WORKDIR /app
 
