@@ -54,7 +54,12 @@ diag install --output ./deploy
 1. **Discovery summary** — each supported tool marked `OK` or missing, with the
    URL that responded.
 2. **Prompts only when needed** — if discovery (or env) already filled a value,
-   you are not asked again. Typical prompts:
+   you are not asked again. Required parameters that discovery missed are
+   **always prompted** in interactive mode (fail closed if you leave them
+   blank). Typical prompts:
+   - Prometheus / Loki / Alertmanager URLs (when not discovered)
+   - Alertmanager → agent webhook URL (when empty after AM is known)
+   - Grafana URL (optional — Enter skips annotations)
    - LLM provider (when no Ollama / AWS / OpenAI / Anthropic / Google credentials
      were detected)
    - Provider-specific secrets (`OPENAI_API_KEY`, AWS region, Ollama base URL, …)

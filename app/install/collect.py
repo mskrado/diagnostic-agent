@@ -61,27 +61,82 @@ def collect(
     # --- Preset ---
     params.preset = _resolve_preset(preset, report, overrides)
 
-    # --- Required data / control plane (fail closed unless --allow-degraded) ---
+    # --- Required data / control plane (prompt, then fail closed unless degraded) ---
+    if not params.prometheus_url and not non_interactive:
+        params.prometheus_url = _prompt(
+            "Prometheus URL",
+            default="http://127.0.0.1:9090",
+        )
+        if params.prometheus_url:
+            report.decisions.append(
+                f"Prometheus URL from prompt -> {params.prometheus_url}"
+            )
+
     if not params.loki_url:
         if allow_degraded:
             params.metrics_only = True
             report.decisions.append("Loki missing -> metrics-only diagnosis")
+        elif not non_interactive:
+            params.loki_url = _prompt(
+                "Loki URL",
+                default="http://127.0.0.1:3100",
+            )
+            if params.loki_url:
+                report.decisions.append(f"Loki URL from prompt -> {params.loki_url}")
+            else:
+                missing.append(
+                    "Loki URL (--loki-url / AGENT_LOKI_URL / discovery / prompt)"
+                )
         else:
             missing.append(
                 "Loki URL (--loki-url / AGENT_LOKI_URL / discovery)"
             )
+
     if not params.alertmanager_url:
         if allow_degraded:
             params.webhook_disabled = True
             report.decisions.append(
                 "Alertmanager missing -> webhook routing disabled"
             )
+        elif not non_interactive:
+            params.alertmanager_url = _prompt(
+                "Alertmanager URL",
+                default="http://127.0.0.1:9093",
+            )
+            if params.alertmanager_url:
+                report.decisions.append(
+                    f"Alertmanager URL from prompt -> {params.alertmanager_url}"
+                )
+            else:
+                missing.append(
+                    "Alertmanager URL (--alertmanager-url / discovery / prompt)"
+                )
         else:
             missing.append(
                 "Alertmanager URL (--alertmanager-url / discovery)"
             )
-    elif not params.webhook_url:
-        missing.append("Alertmanager -> agent webhook URL (--webhook-url)")
+
+    if params.alertmanager_url and not params.webhook_url:
+        if not non_interactive:
+            params.webhook_url = _prompt(
+                "Alertmanager -> agent webhook URL",
+                default=matrix.alertmanager_to_agent_webhook
+                or "http://diagnostic-agent:8000/webhook",
+            )
+        if not params.webhook_url:
+            missing.append("Alertmanager -> agent webhook URL (--webhook-url)")
+
+    # Grafana URL: optional; prompt only when interactive and not set so the
+    # operator can supply it or leave blank to disable annotations.
+    if not params.grafana_url and not non_interactive and not allow_degraded:
+        params.grafana_url = _prompt(
+            "Grafana URL (Enter to skip annotations)",
+            default="",
+        )
+        if params.grafana_url:
+            report.decisions.append(
+                f"Grafana URL from prompt -> {params.grafana_url}"
+            )
 
     # Grafana annotations: optional (not required to run the agent).
     if not params.grafana_url:
@@ -92,8 +147,8 @@ def collect(
     # Hard gate: Prometheus URL must exist by this point.
     if not params.prometheus_url:
         raise ValueError(
-            "Prometheus URL is required. Re-run after Prometheus is reachable "
-            "or pass --prometheus-url."
+            "Prometheus URL is required. Re-run after Prometheus is reachable, "
+            "pass --prometheus-url, or enter it when prompted."
         )
 
     if missing:

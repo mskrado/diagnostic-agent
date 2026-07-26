@@ -126,11 +126,17 @@ def run_install(args: argparse.Namespace) -> int:
     if report.errors and not args.prometheus_url:
         for err in report.errors:
             print(f"ERROR: {err}", file=sys.stderr)
+        if args.non_interactive:
+            print(
+                "\nDiscovery failed. Fix connectivity or pass --prometheus-url.",
+                file=sys.stderr,
+            )
+            return 1
         print(
-            "\nDiscovery failed. Fix connectivity or pass --prometheus-url.",
+            "\nDiscovery incomplete — continuing to collect required "
+            "parameters interactively.",
             file=sys.stderr,
         )
-        return 1
 
     overrides = {
         "preset": args.preset,

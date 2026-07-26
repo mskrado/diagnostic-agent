@@ -132,6 +132,42 @@ def test_collect_fail_closed_without_loki_or_alertmanager(monkeypatch):
         )
 
 
+def test_collect_prompts_for_missing_required_urls(monkeypatch):
+    """Interactive mode must ask for required params discovery did not fill."""
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix()
+    answers = iter(
+        [
+            "http://prom:9090",
+            "http://loki:3100",
+            "http://am:9093",
+            "",  # skip Grafana
+            "n",  # no email
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    params = collect(
+        report,
+        non_interactive=False,
+        preset="generic-prometheus",
+        overrides={"chat_provider": "ollama"},
+    )
+    assert params.prometheus_url == "http://prom:9090"
+    assert params.loki_url == "http://loki:3100"
+    assert params.alertmanager_url == "http://am:9093"
+    assert params.webhook_disabled is False
+    assert params.metrics_only is False
+    assert any("Prometheus URL from prompt" in d for d in report.decisions)
+    assert any("Loki URL from prompt" in d for d in report.decisions)
+    assert any("Alertmanager URL from prompt" in d for d in report.decisions)
+
+
 def test_collect_degrades_with_allow_degraded(monkeypatch):
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix(
