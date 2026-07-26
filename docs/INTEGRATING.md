@@ -13,7 +13,14 @@ in your own repository — and the published agent does the rest.
 
 ## 2. Create a workspace
 
-Copy `examples/hello-world/` into your repository and edit:
+**Preferred:** run the installer so discovery fills endpoints and generates
+alert/Alertmanager wiring for you — see [INSTALL.md](INSTALL.md):
+
+```bash
+diag install --output ./deploy
+```
+
+**Manual:** copy `examples/hello-world/` into your repository and edit:
 
 ```text
 infrastructure/diagnostic-agent/

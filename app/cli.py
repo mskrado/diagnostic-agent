@@ -376,6 +376,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.set_defaults(func=_cmd_eval)
 
+    from .install.cli import add_install_parser
+
+    add_install_parser(sub)
+
     return parser
 
 
