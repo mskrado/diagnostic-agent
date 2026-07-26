@@ -9,4 +9,5 @@ dist/
 chroma_db/
 audit/
 eval/results/
+eval-results/
 .env

@@ -15,18 +15,20 @@ formatting. Offline mode needs LLM (+ embeddings when --rag). Live mode POSTs
 to a running agent (--live-url); RAG then depends on the agent's
 AGENT_RAG_ENABLED.
 
+The dataset and result directory come from the active workspace, so a host
+project runs this against its own cases without passing paths.
+
 Usage
 -----
-    cd diagnostic-agent
     # blind (default)
-    python eval/run_blind_eval.py --only jvm-heap-oom
+    diag eval blind --only jvm-heap-oom
     # with RAG (offline)
-    python eval/run_blind_eval.py --rag --only jvm-heap-oom --judge
-    # or set EVAL_INCLUDE_RAG=true in diagnostic-agent/.env
+    diag eval blind --rag --only jvm-heap-oom --judge
+    # or set EVAL_INCLUDE_RAG=true in the workspace .env
     # live (agent's RAG setting applies)
-    python eval/run_blind_eval.py --live-url http://localhost:8001 --loki-url http://localhost:3100
+    diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:3100
     # mixed errors in one request (realistic Loki sample)
-    python eval/run_blind_eval.py --merge --only postgres-connectivity,redis-connection,jvm-heap-oom
+    diag eval blind --merge --only postgres-connectivity,redis-connection,jvm-heap-oom
 """
 from __future__ import annotations
 
@@ -41,24 +43,22 @@ from pathlib import Path
 
 import yaml
 
-_PKG_ROOT = Path(__file__).resolve().parent.parent
-if str(_PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PKG_ROOT))
-
-_DATASET = Path(__file__).resolve().parent / "blind_eval_dataset.yaml"
-_RESULTS_DIR = Path(__file__).resolve().parent / "results"
+from ..workspace import Workspace
+from ..workspace import load as load_workspace
 
 # Cached RAG store for offline --rag runs (built once per process).
 _RAG_STORE = None
 
+_RESULTS_DIRNAME = "eval-results"
 
-def _load_eval_dotenv() -> None:
-    """Load diagnostic-agent/.env into os.environ (EVAL_INCLUDE_RAG is not AGENT_*).
+
+def _load_eval_dotenv(root: Path) -> None:
+    """Load the workspace .env into os.environ (EVAL_INCLUDE_RAG is not AGENT_*).
 
     pydantic-settings only applies matching AGENT_* fields; EVAL_* must be loaded
     explicitly for os.environ.get() in main().
     """
-    env_path = _PKG_ROOT / ".env"
+    env_path = root / ".env"
     if not env_path.is_file():
         return
     try:
@@ -622,41 +622,39 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def main() -> int:
-    _load_eval_dotenv()
+def main(argv: list[str] | None = None, *, workspace: Workspace | None = None) -> int:
+    ws = workspace or load_workspace()
+    _load_eval_dotenv(ws.root)
     ap = argparse.ArgumentParser(
+        prog="diag eval blind",
         description=(
             "Diagnostic eval: score LLM root-cause ID from injected logs. "
             "Default is RAG-off (blind). Pass --rag or set EVAL_INCLUDE_RAG=true "
-            "to inject runbook chunks. See eval/README.md."
+            "to inject runbook chunks. See docs/TOOLS.md."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  python eval/run_blind_eval.py\n"
-            "  python eval/run_blind_eval.py --rag --only jvm-heap-oom --judge\n"
-            "  python eval/run_blind_eval.py --only jvm-heap-oom --judge\n"
-            "  python eval/run_blind_eval.py --limit 3\n"
-            "  python eval/run_blind_eval.py --merge --only "
+            "  diag eval blind\n"
+            "  diag eval blind --rag --only jvm-heap-oom --judge\n"
+            "  diag eval blind --limit 3\n"
+            "  diag eval blind --merge --only "
             "postgres-connectivity,redis-connection,jvm-heap-oom --judge\n"
-            "  python eval/run_blind_eval.py --live-url http://localhost:8001 "
+            "  diag eval blind --live-url http://localhost:8001 "
             "--loki-url http://localhost:3100 --only redis-connection\n"
         ),
     )
     ap.add_argument(
         "--dataset",
-        default=str(_DATASET),
+        default=str(ws.blind_eval_path) if ws.blind_eval_path else None,
         metavar="PATH",
-        help=(
-            "Path to the blind-eval YAML dataset "
-            f"(default: {_DATASET.name} next to this script)"
-        ),
+        help="Path to the blind-eval YAML dataset (default: the workspace dataset)",
     )
     ap.add_argument(
         "--out",
-        default=str(_RESULTS_DIR),
+        default=str(ws.root / _RESULTS_DIRNAME),
         metavar="DIR",
-        help="Directory for result JSON files (default: eval/results/)",
+        help=f"Directory for result JSON files (default: <workspace>/{_RESULTS_DIRNAME})",
     )
     ap.add_argument(
         "--only",
@@ -733,7 +731,15 @@ def main() -> int:
         metavar="N",
         help="RNG seed for shuffling interleaved logs when --merge is set (default: 42)",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+
+    if not args.dataset:
+        print(
+            f"ERROR: no blind-eval dataset in {ws.root} (expected blind_eval.yaml). "
+            "Pass --dataset, or run `diag init` to scaffold one.",
+            file=sys.stderr,
+        )
+        return 2
 
     cases = load_cases(Path(args.dataset))
     if args.only:

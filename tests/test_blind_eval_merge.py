@@ -1,16 +1,9 @@
 """Tests for mixed-case (--merge) blind-eval helpers."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-from eval.run_blind_eval import merge_cases, score_merged_case  # noqa: E402
+from app.tools.blind_eval import merge_cases, score_merged_case
 
 
 def _case(cid: str, system: str, logs: list[str], **kwargs) -> dict:
@@ -163,7 +156,7 @@ def test_score_merged_partial_miss():
 
 
 def test_build_judge_prompt_includes_full_diagnosis_json():
-    from eval.run_blind_eval import build_judge_prompt
+    from app.tools.blind_eval import build_judge_prompt
 
     case = _case(
         "postgres-connectivity",
@@ -194,7 +187,7 @@ def test_build_judge_prompt_includes_full_diagnosis_json():
 
 
 def test_build_judge_prompt_merged_credits_categories_and_skips_controls():
-    from eval.run_blind_eval import build_judge_prompt, merge_cases
+    from app.tools.blind_eval import build_judge_prompt, merge_cases
 
     sources = [
         _case(

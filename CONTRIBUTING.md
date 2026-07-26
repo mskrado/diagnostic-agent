@@ -18,8 +18,16 @@ Optional LLM eval is maintainer-triggered only (no secrets on untrusted PRs).
 
 ```bash
 python -m venv .venv
-pip install -r requirements.txt
+pip install -e ".[dev]"
 pytest -q
+```
+
+This repository is itself a workspace, so the host-facing commands run against
+it directly — the same code path a host project uses:
+
+```bash
+diag lint                              # the corpus lint CI runs
+diag validate -w examples/hello-world  # a bundled example workspace
 ```
 
 For profile/loader work, also run:
@@ -49,4 +57,5 @@ This certifies the contribution under the [DCO 1.1](https://developercertificate
 
 - One atomic change per PR
 - Include tests for new Python modules
-- Update `docs/INTEGRATING.md` if the profile schema changes
+- Update `docs/INTEGRATING.md` if the profile schema changes, and
+  `docs/WORKSPACE.md` if the workspace manifest changes

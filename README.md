@@ -8,38 +8,37 @@ a pluggable LLM, and emits a structured diagnostic report.
 
 **Hypotheses only — no auto-remediation.**
 
-Integrating into *any* project means supplying an **integration profile**
-(YAML + runbooks) and environment variables — **not** forking this codebase.
+Integrating into *any* project means supplying a **workspace** — configuration
+and content that live in *your* repository — **not** forking this codebase.
 
-## Quick start (hello-world profile)
+## Quick start (hello-world workspace)
 
 ```bash
 pip install -e ".[dev]"
 
-export AGENT_PROFILE_DIR=$PWD/examples/hello-world
-export AGENT_DEFAULT_PRESET=generic-prometheus
 export AGENT_PROMETHEUS_URL=http://localhost:9090
 export AGENT_LOKI_URL=http://localhost:3100
-export AGENT_RAG_ENABLED=true
 # LLM — pick one provider (see Configuration)
 export AGENT_CHAT_PROVIDER=ollama
 export AGENT_CHAT_MODEL=mistral:7b-instruct
 
-diagnostic-agent health-check
-diagnostic-agent serve --port 8000
+diag validate -w examples/hello-world
+diag serve -w examples/hello-world --port 8000
 ```
 
-Docker:
+Docker — mount your workspace at `/workspace` and every command finds it:
 
 ```bash
 docker build -t diagnostic-agent:local .
 docker run --rm -p 8001:8000 \
-  -e AGENT_PROFILE_DIR=/profile \
-  -e AGENT_DEFAULT_PRESET=generic-prometheus \
   -e AGENT_PROMETHEUS_URL=http://host.docker.internal:9090 \
   -e AGENT_LOKI_URL=http://host.docker.internal:3100 \
-  -v "$PWD/examples/hello-world:/profile:ro" \
+  -v "$PWD/examples/hello-world:/workspace:ro" \
   diagnostic-agent:local
+
+# same image, no server: check a workspace in CI
+docker run --rm -v "$PWD/examples/hello-world:/workspace:ro" \
+  diagnostic-agent:local diag validate
 ```
 
 POST a synthetic alert:
@@ -53,9 +52,28 @@ curl -X POST http://localhost:8000/alert -H 'Content-Type: application/json' -d 
 }'
 ```
 
-## Integration profile
+## Host workspace
 
-Point `AGENT_PROFILE_DIR` at a directory containing:
+A workspace is one directory in your repository holding everything specific to
+your stack. An `agent.yaml` manifest declares where each piece lives, so
+commands take no path arguments:
+
+```
+infrastructure/diagnostic-agent/
+├── agent.yaml        # schema, pinned agent version, preset, paths
+├── profile/          # the integration profile (table below)
+├── runbooks/         # RAG corpus (markdown)
+├── scenarios.yaml    # runbook E2E scenarios
+└── blind_eval.yaml   # blind-eval dataset
+```
+
+```yaml
+schema: 1
+agent_version: 0.1.0
+extends: spring-micrometer
+```
+
+The profile directory supplies:
 
 | File | Purpose |
 |---|---|
@@ -64,9 +82,12 @@ Point `AGENT_PROFILE_DIR` at a directory containing:
 | `logs_profile.yaml` | Loki label, level filter, alert line filters, optional module regex |
 | `redaction.yaml` | Ordered regex redaction rules |
 | `prompt_profile.yaml` | Platform description + tool-run hints |
-| `runbooks/` | Optional RAG corpus (markdown) |
 
-Config precedence: **env vars > profile files > built-in presets**.
+Every key is optional — a directory following the conventional layout resolves
+identically, and tools skip checks whose inputs you have not supplied yet. See
+**[docs/WORKSPACE.md](docs/WORKSPACE.md)** for the full reference.
+
+Config precedence: **env vars > workspace manifest > profile files > built-in presets**.
 
 Built-in presets (shipped in-package):
 
@@ -84,9 +105,9 @@ your profile only.
 scrubbing. Reuse a parent rule's `name` to override it.
 
 The agent refuses to start when the resolved profile has zero redaction rules,
-so a mis-pointed `AGENT_PROFILE_DIR` fails loudly instead of quietly emitting raw
-data. `diagnostic-agent health-check` and `GET /health` both report the count.
-Set `AGENT_REQUIRE_REDACTION=false` to opt out deliberately.
+so a mis-pointed workspace fails loudly instead of quietly emitting raw data.
+`diag validate` and `GET /health` both report the count. Set
+`AGENT_REQUIRE_REDACTION=false` to opt out deliberately.
 
 Reference examples:
 
@@ -112,8 +133,9 @@ All settings use the `AGENT_` prefix (see `.env.example`).
 
 | Variable | Default | Notes |
 |---|---|---|
-| `AGENT_PROFILE_DIR` | *(empty)* | Path to integration profile |
-| `AGENT_DEFAULT_PRESET` | `spring-micrometer` | Built-in preset for `extends:` chains |
+| `AGENT_WORKSPACE` | `/workspace` in the image | Host workspace directory |
+| `AGENT_PROFILE_DIR` | *(from workspace)* | Path to integration profile |
+| `AGENT_DEFAULT_PRESET` | `generic-prometheus` | Built-in preset for `extends:` chains |
 | `AGENT_REQUIRE_REDACTION` | `true` | Refuse to start with zero redaction rules |
 | `AGENT_PROMETHEUS_URL` | `http://prometheus:9090` | |
 | `AGENT_LOKI_URL` | `http://loki:3100` | |
@@ -122,6 +144,20 @@ All settings use the `AGENT_` prefix (see `.env.example`).
 | `AGENT_RAG_ENABLED` | `true` | |
 | `AGENT_SERVICE_MAP_PATH` | *(from profile)* | Override topology file |
 | `AGENT_RUNBOOKS_PATH` | *(from profile or `./runbooks`)* | Override RAG corpus |
+
+## Tools
+
+Every command runs against a workspace, so host projects use the published
+image rather than writing their own scripts.
+
+| Command | Purpose |
+|---|---|
+| `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
+| `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
+| `diag doctor` | Probe Prometheus, Loki, Grafana, and SMTP connectivity |
+| `diag e2e --url` | POST every scenario at a running agent and assert the report + redaction |
+| `diag eval blind` | Score LLM root-cause identification against the workspace dataset |
+| `diag serve` | Run the `/alert` webhook server |
 
 ## Develop
 
@@ -136,7 +172,10 @@ pytest -q
 `requirements-dev.txt` (tests), so `pip install -r` and `pip install .[dev]`
 cannot drift apart.
 
-Blind LLM eval (optional): `python eval/run_blind_eval.py` — see `eval/README.md`.
+This repository is itself a workspace — `runbooks/`, `runbook_scenarios.yaml`,
+and `eval/blind_eval_dataset.yaml` resolve through the same conventions a host
+uses — so CI exercises the host-facing commands rather than private test paths.
+See `eval/README.md` for the blind-eval workflow.
 
 ## License
 

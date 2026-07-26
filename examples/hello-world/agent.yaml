@@ -1,0 +1,4 @@
+# Minimal workspace manifest. The profile sections and runbooks/ sit directly
+# in this directory, so only the preset needs declaring.
+schema: 1
+extends: generic-prometheus

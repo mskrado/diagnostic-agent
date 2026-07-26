@@ -1,0 +1,5 @@
+# Workspace manifest for a Spring Boot host exposing Micrometer metrics.
+# Profile sections sit directly in this directory; a real host would add
+# runbooks/, scenarios.yaml, and blind_eval.yaml alongside them.
+schema: 1
+extends: spring-micrometer
