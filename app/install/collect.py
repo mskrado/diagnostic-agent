@@ -1,11 +1,32 @@
 ﻿"""Resolve every parameter required for a self-sufficient install."""
 from __future__ import annotations
 
-import getpass
+import json
 import os
 from typing import Any
 
-from .models import DiscoveryReport, InstallParams, ReachabilityMatrix, ToolKind
+from .models import (
+    HEALTH_PATHS,
+    DiscoveryReport,
+    InstallParams,
+    ReachabilityMatrix,
+    ToolKind,
+)
+from .prompt import Prompter, container_rewrite
+
+_SECTION_TOTAL = 6
+
+_PRESETS = ["generic-prometheus", "spring-micrometer"]
+_PROVIDERS = ["ollama", "openai", "bedrock", "anthropic", "google"]
+
+# Interactive provider choice -> stored provider id.
+_PROVIDER_IDS = {
+    "ollama": "ollama",
+    "openai": "openai",
+    "bedrock": "bedrock_converse",
+    "anthropic": "anthropic",
+    "google": "google_genai",
+}
 
 
 def collect(
@@ -14,12 +35,16 @@ def collect(
     preset: str = "auto",
     non_interactive: bool = False,
     allow_degraded: bool = False,
+    accept_defaults: bool = False,
+    assume_yes: bool = False,
+    probe_timeout: float = 3.0,
     overrides: dict[str, Any] | None = None,
 ) -> InstallParams:
     """Merge discovery + env/flags + prompts into :class:`InstallParams`.
 
     Default interactive behaviour **confirms every parameter** after discovery
-    (discovered / flag / env values are offered as defaults; Enter accepts).
+    (discovered / flag / env values are offered as defaults; Enter accepts), then
+    shows a review summary before the bundle is written.
 
     Default is also **fail closed**: Prometheus, Loki, Alertmanager (+ webhook),
     and a usable LLM must be resolved before a complete install bundle is
@@ -27,11 +52,77 @@ def collect(
     Grafana annotations and SMTP remain optional delivery channels.
     """
     overrides = overrides or {}
-    params = InstallParams()
-    matrix = report.reachability
-    missing: list[str] = []
+    interactive = not non_interactive
+    prompter = Prompter(interactive=interactive, accept_defaults=accept_defaults)
 
-    # --- Seed from flag → env → discovery (candidates for confirmation) ---
+    while True:
+        params = InstallParams()
+        missing: list[str] = []
+        _seed_params(params, report, overrides)
+        params.preset = _resolve_preset(preset, report, overrides)
+
+        if interactive:
+            _confirm_core_parameters(
+                params,
+                report,
+                prompter,
+                missing,
+                allow_degraded=allow_degraded,
+                probe_timeout=probe_timeout,
+            )
+        else:
+            _apply_non_interactive_gates(
+                params, report, missing, allow_degraded=allow_degraded
+            )
+
+        if not params.prometheus_url:
+            raise ValueError(
+                "Prometheus URL is required. Re-run after Prometheus is reachable, "
+                "pass --prometheus-url, or enter it when prompted."
+            )
+        if missing:
+            raise ValueError(
+                "Incomplete install parameters (fail closed). Provide the missing "
+                "values or re-run with --allow-degraded:\n"
+                + "\n".join(f"  - {item}" for item in missing)
+            )
+
+        _resolve_llm(
+            params,
+            report,
+            overrides,
+            prompter,
+            non_interactive=non_interactive,
+            allow_degraded=allow_degraded,
+        )
+        _resolve_smtp(
+            params, report, overrides, prompter, non_interactive=non_interactive
+        )
+        _resolve_grafana_token(params, report, overrides, prompter)
+
+        if not interactive or accept_defaults or assume_yes:
+            break
+        prompter.summary("Review", _summary_rows(params))
+        if prompter.yes_no("Write the install bundle with these settings?", default=True):
+            break
+        report.decisions.append("operator re-entered parameters at review")
+        print("\nRestarting parameter collection...")
+
+    if allow_degraded:
+        report.decisions.append("allow_degraded=true")
+    report.decisions.append(f"preset={params.preset}")
+    report.decisions.append(f"chat={params.chat_provider}/{params.chat_model}")
+    report.decisions.append(
+        f"placement={report.reachability.agent_placement} webhook={params.webhook_url}"
+    )
+    return params
+
+
+def _seed_params(
+    params: InstallParams, report: DiscoveryReport, overrides: dict[str, Any]
+) -> None:
+    """Seed candidates from flag -> env -> discovery."""
+    matrix = report.reachability
     params.prometheus_url = _first(
         overrides.get("prometheus_url"),
         matrix.agent_to_prometheus,
@@ -60,159 +151,178 @@ def collect(
     params.agent_host_port = matrix.agent_host_port
     params.agent_container_name = matrix.agent_container_name
 
-    # --- Preset ---
-    params.preset = _resolve_preset(preset, report, overrides)
 
-    if not non_interactive:
-        _confirm_all_parameters(
-            params,
-            report,
-            matrix,
-            missing,
-            allow_degraded=allow_degraded,
-        )
+def _summary_rows(params: InstallParams) -> list[tuple[str, str]]:
+    rows = [
+        ("preset", params.preset),
+        ("prometheus", params.prometheus_url),
+        ("loki", params.loki_url or "(metrics-only)"),
+        ("alertmanager", params.alertmanager_url or "(webhook disabled)"),
+        ("webhook", "(disabled)" if params.webhook_disabled else params.webhook_url),
+        ("grafana", params.grafana_url or "(annotations disabled)"),
+        ("grafana token", "***" if params.grafana_token else "(none)"),
+        ("chat", f"{params.chat_provider}/{params.chat_model}"),
+        ("embeddings", f"{params.embed_provider}/{params.embed_model}"),
+    ]
+    if params.email_enabled:
+        rows.append(("email", f"{params.smtp_host}:{params.smtp_port} -> {params.email_to}"))
     else:
-        _apply_non_interactive_gates(
-            params, report, missing, allow_degraded=allow_degraded
-        )
+        rows.append(("email", "(disabled)"))
+    return rows
 
-    # Hard gate: Prometheus URL must exist by this point.
-    if not params.prometheus_url:
-        raise ValueError(
-            "Prometheus URL is required. Re-run after Prometheus is reachable, "
-            "pass --prometheus-url, or enter it when prompted."
-        )
 
-    if missing:
-        raise ValueError(
-            "Incomplete install parameters (fail closed). Provide the missing "
-            "values or re-run with --allow-degraded:\n"
-            + "\n".join(f"  - {item}" for item in missing)
-        )
-
-    # --- LLM (seed + confirm interactively; fail closed when non-interactive) ---
-    _resolve_llm(
-        params,
-        report,
-        overrides,
-        non_interactive=non_interactive,
-        allow_degraded=allow_degraded,
+def _confirm_endpoint(
+    prompter: Prompter,
+    report: DiscoveryReport,
+    label: str,
+    current: str,
+    kind: ToolKind | None,
+    *,
+    fallback: str,
+    allow_empty: bool,
+    probe_timeout: float,
+    help_text: str = "",
+) -> str:
+    """Confirm one endpoint URL, then check reachability and container routing."""
+    default = current or ("" if allow_empty else fallback)
+    url = prompter.url(
+        label, default=default, allow_empty=allow_empty, help_text=help_text
     )
+    if not url:
+        return ""
 
-    # --- SMTP ---
-    _resolve_smtp(params, report, overrides, non_interactive=non_interactive)
+    # Discovery already proved the seeded candidate; only probe operator edits.
+    changed = url != default
+    if changed and kind is not None and not _probe_ok(url, kind, probe_timeout):
+        prompter.warn(f"{url} did not answer a health check from this host")
+        report.warnings.append(f"{label}: {url} unreachable during install")
 
-    # --- Grafana token ---
-    params.grafana_token = _first(
-        overrides.get("grafana_token"),
-        os.environ.get("AGENT_GRAFANA_TOKEN"),
-        "",
-    )
-    if params.grafana_url and not non_interactive:
-        entered = _prompt_secret(
-            "Grafana service-account token (Enter to keep existing / skip)",
-            default="",
-        )
-        if entered:
-            params.grafana_token = entered
-    if not params.grafana_token:
-        params.grafana_annotations_enabled = False
-        if params.grafana_url:
-            report.decisions.append(
-                "No Grafana token -- annotations disabled until provisioned"
-            )
-
-    if allow_degraded:
-        report.decisions.append("allow_degraded=true")
-
-    report.decisions.append(f"preset={params.preset}")
-    report.decisions.append(f"chat={params.chat_provider}/{params.chat_model}")
-    report.decisions.append(
-        f"placement={matrix.agent_placement} webhook={params.webhook_url}"
-    )
-    return params
+    rewrite = container_rewrite(url)
+    if rewrite and prompter.yes_no(
+        f"The agent runs in a container; use {rewrite} instead?",
+        default=True,
+        help_text="Loopback addresses point at the agent container, not your host.",
+    ):
+        report.decisions.append(f"{label}: rewritten for container -> {rewrite}")
+        return rewrite
+    return url
 
 
-def _confirm_all_parameters(
+def _probe_ok(url: str, kind: ToolKind, timeout: float) -> bool:
+    paths = HEALTH_PATHS.get(kind)
+    if not paths:
+        return True
+    from .discover import _http_probe
+
+    try:
+        ok, _, _ = _http_probe(url, paths, timeout=timeout)
+    except Exception:  # noqa: BLE001 - a failed probe is advisory only
+        return False
+    return ok
+
+
+def _confirm_core_parameters(
     params: InstallParams,
     report: DiscoveryReport,
-    matrix: ReachabilityMatrix,
+    prompter: Prompter,
     missing: list[str],
     *,
     allow_degraded: bool,
+    probe_timeout: float,
 ) -> None:
-    """Interactive: confirm every install parameter (Enter keeps the default)."""
+    """Interactive: confirm every core parameter (Enter keeps the default)."""
     report.decisions.append("interactive confirm: every parameter")
+    matrix = report.reachability
 
-    params.preset = _prompt(
-        "Metrics/logs preset [generic-prometheus/spring-micrometer]",
-        default=params.preset or "generic-prometheus",
+    prompter.section("Workspace preset", total=_SECTION_TOTAL)
+    params.preset = prompter.choice(
+        "Metrics/logs preset",
+        _PRESETS,
+        default=params.preset or _PRESETS[0],
+        help_text="Selects PromQL templates and log label conventions.",
     )
-    if params.preset not in ("generic-prometheus", "spring-micrometer"):
-        report.warnings.append(
-            f"Unusual preset {params.preset!r}; continuing with operator value"
-        )
 
-    params.prometheus_url = _prompt(
+    prompter.section("Observability endpoints (agent reads these)", total=_SECTION_TOTAL)
+    params.prometheus_url = _confirm_endpoint(
+        prompter,
+        report,
         "Prometheus URL",
-        default=params.prometheus_url or "http://127.0.0.1:9090",
+        params.prometheus_url,
+        ToolKind.PROMETHEUS,
+        fallback="http://127.0.0.1:9090",
+        allow_empty=False,
+        probe_timeout=probe_timeout,
+        help_text="Required: metrics are the primary diagnosis signal.",
     )
     report.decisions.append(f"Prometheus URL confirmed -> {params.prometheus_url}")
 
-    loki_default = params.loki_url or (
-        "" if allow_degraded else "http://127.0.0.1:3100"
+    params.loki_url = _confirm_endpoint(
+        prompter,
+        report,
+        "Loki URL",
+        params.loki_url,
+        ToolKind.LOKI,
+        fallback="http://127.0.0.1:3100",
+        allow_empty=allow_degraded,
+        probe_timeout=probe_timeout,
+        help_text=(
+            "Enter to skip (metrics-only)."
+            if allow_degraded
+            else "Required: log evidence for runbook correlation."
+        ),
     )
-    loki_label = (
-        "Loki URL (Enter for metrics-only)"
-        if allow_degraded
-        else "Loki URL"
-    )
-    params.loki_url = _prompt(loki_label, default=loki_default)
     if params.loki_url:
         report.decisions.append(f"Loki URL confirmed -> {params.loki_url}")
-    elif allow_degraded:
+    else:
         params.metrics_only = True
         report.decisions.append("Loki missing -> metrics-only diagnosis")
-    else:
-        missing.append("Loki URL (--loki-url / AGENT_LOKI_URL / discovery / prompt)")
 
-    am_default = params.alertmanager_url or (
-        "" if allow_degraded else "http://127.0.0.1:9093"
+    prompter.section("Alert routing (Alertmanager -> agent)", total=_SECTION_TOTAL)
+    params.alertmanager_url = _confirm_endpoint(
+        prompter,
+        report,
+        "Alertmanager URL",
+        params.alertmanager_url,
+        ToolKind.ALERTMANAGER,
+        fallback="http://127.0.0.1:9093",
+        allow_empty=allow_degraded,
+        probe_timeout=probe_timeout,
+        help_text=(
+            "Enter to skip webhook wiring."
+            if allow_degraded
+            else "Required: Alertmanager triggers every diagnosis."
+        ),
     )
-    am_label = (
-        "Alertmanager URL (Enter to skip webhook wiring)"
-        if allow_degraded
-        else "Alertmanager URL"
-    )
-    params.alertmanager_url = _prompt(am_label, default=am_default)
     if params.alertmanager_url:
         report.decisions.append(
             f"Alertmanager URL confirmed -> {params.alertmanager_url}"
         )
-        webhook_default = (
-            params.webhook_url
-            or matrix.alertmanager_to_agent_webhook
-            or "http://diagnostic-agent:8000/webhook"
-        )
-        params.webhook_url = _prompt(
+        params.webhook_url = prompter.url(
             "Alertmanager -> agent webhook URL",
-            default=webhook_default,
+            default=(
+                params.webhook_url
+                or matrix.alertmanager_to_agent_webhook
+                or "http://diagnostic-agent:8000/webhook"
+            ),
+            allow_empty=False,
+            help_text="Must be routable from Alertmanager, not from your shell.",
         )
-        if params.webhook_url:
-            report.decisions.append(f"Webhook URL confirmed -> {params.webhook_url}")
-        else:
-            missing.append("Alertmanager -> agent webhook URL (--webhook-url)")
-    elif allow_degraded:
+        report.decisions.append(f"Webhook URL confirmed -> {params.webhook_url}")
+    else:
         params.webhook_disabled = True
         report.decisions.append("Alertmanager missing -> webhook routing disabled")
-    else:
-        missing.append(
-            "Alertmanager URL (--alertmanager-url / discovery / prompt)"
-        )
 
-    params.grafana_url = _prompt(
-        "Grafana URL (Enter to skip annotations)",
-        default=params.grafana_url or "",
+    prompter.section("Grafana annotations (optional)", total=_SECTION_TOTAL)
+    params.grafana_url = _confirm_endpoint(
+        prompter,
+        report,
+        "Grafana URL",
+        params.grafana_url,
+        ToolKind.GRAFANA,
+        fallback="",
+        allow_empty=True,
+        probe_timeout=probe_timeout,
+        help_text="Enter to skip annotation delivery.",
     )
     if params.grafana_url:
         report.decisions.append(f"Grafana URL confirmed -> {params.grafana_url}")
@@ -220,6 +330,8 @@ def _confirm_all_parameters(
         params.annotations_disabled = True
         params.grafana_annotations_enabled = False
         report.decisions.append("Grafana missing -> annotations disabled")
+
+    _ = missing  # interactive prompts are required-or-blank; nothing to accumulate
 
 
 def _apply_non_interactive_gates(
@@ -311,8 +423,8 @@ def _seed_llm_from_environment(
         params.chat_provider = "ollama"
         params.embed_provider = "ollama"
         base = ollama.url or "http://ollama:11434"
-        params.chat_model_kwargs = f'{{"base_url":"{base}"}}'
-        params.embed_model_kwargs = f'{{"base_url":"{base}"}}'
+        params.chat_model_kwargs = json.dumps({"base_url": base})
+        params.embed_model_kwargs = json.dumps({"base_url": base})
         report.decisions.append(f"LLM seed -> ollama at {base}")
         return True
     if has_aws:
@@ -326,8 +438,8 @@ def _seed_llm_from_environment(
             "us-east-1",
         )
         params.aws_region = region
-        params.chat_model_kwargs = f'{{"region_name":"{region}"}}'
-        params.embed_model_kwargs = f'{{"region_name":"{region}"}}'
+        params.chat_model_kwargs = json.dumps({"region_name": region})
+        params.embed_model_kwargs = json.dumps({"region_name": region})
         params.aws_access_key_id = _first(
             overrides.get("aws_access_key_id"),
             os.environ.get("DIAGNOSTIC_AGENT_AWS_ACCESS_KEY_ID"),
@@ -368,90 +480,170 @@ def _seed_llm_from_environment(
     return False
 
 
-def _confirm_llm(params: InstallParams, report: DiscoveryReport) -> None:
-    """Always confirm LLM settings in interactive mode."""
-    default_provider = params.chat_provider or "ollama"
-    # Normalize bedrock_converse display/choice aliases.
-    display = {
-        "bedrock_converse": "bedrock",
-        "google_genai": "google",
-    }.get(default_provider, default_provider)
-    choice = _prompt(
-        "LLM provider [ollama/openai/bedrock/anthropic/google]",
-        default=display,
-    ).lower()
+def _kwargs_value(raw: str, key: str, fallback: str) -> str:
+    try:
+        return str(json.loads(raw or "{}").get(key) or fallback)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return fallback
+
+
+def _confirm_llm(
+    params: InstallParams,
+    report: DiscoveryReport,
+    prompter: Prompter,
+    *,
+    allow_degraded: bool,
+) -> None:
+    """Always confirm LLM settings — including the credentials the agent needs."""
+    prompter.section("Diagnosis LLM", total=_SECTION_TOTAL)
+    display = {"bedrock_converse": "bedrock", "google_genai": "google"}.get(
+        params.chat_provider, params.chat_provider or "ollama"
+    )
+    choice = prompter.choice(
+        "LLM provider",
+        _PROVIDERS,
+        default=display if display in _PROVIDERS else "ollama",
+        help_text="Runs the diagnostic graph and embeds runbooks for retrieval.",
+    )
+    params.chat_provider = _PROVIDER_IDS[choice]
+
     if choice == "openai":
-        params.chat_provider = "openai"
-        params.chat_model = _prompt("Chat model", default=params.chat_model or "gpt-4o-mini")
+        params.chat_model = prompter.text(
+            "Chat model", default=params.chat_model or "gpt-4o-mini"
+        )
         params.embed_provider = "openai"
-        params.embed_model = _prompt(
+        params.embed_model = prompter.text(
             "Embed model", default=params.embed_model or "text-embedding-3-small"
         )
-        if not params.openai_api_key:
-            params.openai_api_key = _prompt_secret("OPENAI_API_KEY")
-    elif choice == "bedrock":
-        params.chat_provider = "bedrock_converse"
-        params.aws_region = _prompt(
-            "AWS region", default=params.aws_region or "us-east-1"
+        params.openai_api_key = _require_key(
+            params.openai_api_key,
+            "OPENAI_API_KEY",
+            prompter,
+            allow_degraded=allow_degraded,
         )
-        params.chat_model = _prompt(
+    elif choice == "bedrock":
+        params.aws_region = prompter.text(
+            "AWS region", default=params.aws_region or "us-east-1", allow_empty=False
+        )
+        params.chat_model = prompter.text(
             "Chat model", default=params.chat_model or "amazon.nova-micro-v1:0"
         )
         params.embed_provider = "bedrock"
-        params.embed_model = _prompt(
+        params.embed_model = prompter.text(
             "Embed model",
             default=params.embed_model or "amazon.titan-embed-text-v2:0",
         )
-        params.chat_model_kwargs = f'{{"region_name":"{params.aws_region}"}}'
+        params.chat_model_kwargs = json.dumps({"region_name": params.aws_region})
         params.embed_model_kwargs = params.chat_model_kwargs
+        _confirm_aws_credentials(params, report, prompter)
     elif choice == "anthropic":
-        params.chat_provider = "anthropic"
-        params.chat_model = _prompt(
+        params.chat_model = prompter.text(
             "Chat model", default=params.chat_model or "claude-3-5-haiku-latest"
         )
-        if not params.anthropic_api_key:
-            params.anthropic_api_key = _prompt_secret("ANTHROPIC_API_KEY")
+        params.anthropic_api_key = _require_key(
+            params.anthropic_api_key,
+            "ANTHROPIC_API_KEY",
+            prompter,
+            allow_degraded=allow_degraded,
+        )
+        report.warnings.append(
+            "Anthropic has no embeddings API -- set AGENT_EMBED_* for RAG"
+        )
     elif choice == "google":
-        params.chat_provider = "google_genai"
-        params.chat_model = _prompt(
+        params.chat_model = prompter.text(
             "Chat model", default=params.chat_model or "gemini-1.5-flash"
         )
         params.embed_provider = "google_genai"
-        params.embed_model = _prompt(
+        params.embed_model = prompter.text(
             "Embed model", default=params.embed_model or "text-embedding-004"
         )
-        if not params.google_api_key:
-            params.google_api_key = _prompt_secret("GOOGLE_API_KEY")
+        params.google_api_key = _require_key(
+            params.google_api_key,
+            "GOOGLE_API_KEY",
+            prompter,
+            allow_degraded=allow_degraded,
+        )
     else:
-        params.chat_provider = "ollama"
         params.embed_provider = "ollama"
-        params.chat_model = _prompt(
+        params.chat_model = prompter.text(
             "Chat model", default=params.chat_model or "mistral:7b-instruct"
         )
-        params.embed_model = _prompt(
+        params.embed_model = prompter.text(
             "Embed model", default=params.embed_model or "nomic-embed-text"
         )
-        base = "http://127.0.0.1:11434"
-        if params.chat_model_kwargs and "base_url" in params.chat_model_kwargs:
-            # Prefer seeded base_url when present in JSON kwargs.
-            try:
-                import json
+        base = prompter.url(
+            "Ollama base URL",
+            default=_kwargs_value(
+                params.chat_model_kwargs, "base_url", "http://127.0.0.1:11434"
+            ),
+            allow_empty=False,
+        )
+        rewrite = container_rewrite(base)
+        if rewrite and prompter.yes_no(
+            f"The agent runs in a container; use {rewrite} instead?", default=True
+        ):
+            base = rewrite
+            report.decisions.append(f"Ollama base rewritten for container -> {base}")
+        params.chat_model_kwargs = json.dumps({"base_url": base})
+        params.embed_model_kwargs = json.dumps({"base_url": base})
 
-                base = str(json.loads(params.chat_model_kwargs).get("base_url") or base)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-        base = _prompt("Ollama base URL", default=base)
-        params.chat_model_kwargs = f'{{"base_url":"{base}"}}'
-        params.embed_model_kwargs = f'{{"base_url":"{base}"}}'
     report.decisions.append(
         f"LLM confirmed -> {params.chat_provider}/{params.chat_model}"
     )
+
+
+def _require_key(
+    current: str,
+    env_name: str,
+    prompter: Prompter,
+    *,
+    allow_degraded: bool,
+) -> str:
+    """Prompt for a provider credential the agent cannot run without."""
+    if current:
+        return current
+    value = prompter.secret(
+        env_name,
+        allow_empty=allow_degraded,
+        help_text="Written to agent/.env only; never to install-report.json.",
+    )
+    if value or allow_degraded:
+        return value
+    raise ValueError(
+        f"{env_name} is required for the selected provider (fail closed). "
+        f"Set {env_name} in the environment, or re-run with --allow-degraded."
+    )
+
+
+def _confirm_aws_credentials(
+    params: InstallParams, report: DiscoveryReport, prompter: Prompter
+) -> None:
+    """Bedrock needs either explicit keys in .env or ambient AWS credentials."""
+    if params.aws_access_key_id and params.aws_secret_access_key:
+        return
+    if prompter.yes_no(
+        "Use ambient AWS credentials (instance role / shared config)?",
+        default=True,
+        help_text="Answer n to write explicit keys into agent/.env.",
+    ):
+        report.decisions.append("Bedrock -> ambient AWS credentials")
+        report.warnings.append(
+            "No AWS keys in agent/.env -- the container must inherit credentials "
+            "(instance role, mounted ~/.aws, or compose environment)"
+        )
+        return
+    params.aws_access_key_id = prompter.secret("AWS_ACCESS_KEY_ID", allow_empty=False)
+    params.aws_secret_access_key = prompter.secret(
+        "AWS_SECRET_ACCESS_KEY", allow_empty=False
+    )
+    report.decisions.append("Bedrock -> explicit AWS keys in agent/.env")
 
 
 def _resolve_llm(
     params: InstallParams,
     report: DiscoveryReport,
     overrides: dict[str, Any],
+    prompter: Prompter,
     *,
     non_interactive: bool,
     allow_degraded: bool = False,
@@ -473,13 +665,14 @@ def _resolve_llm(
             "ensure Ollama is reachable, or re-run with --allow-degraded."
         )
 
-    _confirm_llm(params, report)
+    _confirm_llm(params, report, prompter, allow_degraded=allow_degraded)
 
 
 def _resolve_smtp(
     params: InstallParams,
     report: DiscoveryReport,
     overrides: dict[str, Any],
+    prompter: Prompter,
     *,
     non_interactive: bool,
 ) -> None:
@@ -509,38 +702,71 @@ def _resolve_smtp(
         return
 
     if non_interactive:
-        # Seeded Mailpit / override already applied; nothing to prompt.
         return
 
-    default_enable = "y" if params.email_enabled else "n"
-    enable = _prompt(
-        "Enable diagnostic email delivery? [y/N]",
-        default=default_enable,
-    )
-    if enable.lower() not in ("y", "yes"):
+    prompter.section("Diagnostic email (optional)", total=_SECTION_TOTAL)
+    if not prompter.yes_no(
+        "Enable diagnostic email delivery?",
+        default=params.email_enabled,
+        help_text="The agent's hypothesis report, separate from Alertmanager mail.",
+    ):
         params.email_enabled = False
         report.decisions.append("SMTP confirmed disabled")
         return
+
     params.email_enabled = True
-    params.smtp_host = _prompt("SMTP host", default=params.smtp_host or "localhost")
-    params.smtp_port = int(_prompt("SMTP port", default=str(params.smtp_port or 587)))
-    params.smtp_from = _prompt("From address", default=params.smtp_from)
-    params.email_to = _prompt("To address", default=params.email_to)
-    params.smtp_username = _prompt(
+    params.smtp_host = prompter.text(
+        "SMTP host",
+        default=params.smtp_host or "localhost",
+        allow_empty=False,
+    )
+    if params.smtp_host in ("localhost", "127.0.0.1", "::1"):
+        prompter.warn(
+            f"{params.smtp_host} resolves inside the agent container -- use a "
+            "container name or host.docker.internal for a host relay"
+        )
+        report.warnings.append(
+            f"SMTP host {params.smtp_host} may be unreachable from the container"
+        )
+    params.smtp_port = prompter.port("SMTP port", default=params.smtp_port or 587)
+    params.smtp_from = prompter.text("From address", default=params.smtp_from)
+    params.email_to = prompter.text("To address", default=params.email_to)
+    params.smtp_username = prompter.text(
         "SMTP username (empty ok)", default=params.smtp_username or ""
     )
     if params.smtp_username and not params.smtp_password:
-        params.smtp_password = _prompt_secret("SMTP password")
-    params.smtp_starttls = (
-        _prompt(
-            "STARTTLS? [Y/n]",
-            default="y" if params.smtp_starttls else "n",
-        ).lower()
-        not in ("n", "no")
+        params.smtp_password = prompter.secret("SMTP password")
+    params.smtp_starttls = prompter.yes_no(
+        "Use STARTTLS?", default=params.smtp_starttls
     )
     report.decisions.append(
         f"SMTP confirmed -> {params.smtp_host}:{params.smtp_port}"
     )
+
+
+def _resolve_grafana_token(
+    params: InstallParams,
+    report: DiscoveryReport,
+    overrides: dict[str, Any],
+    prompter: Prompter,
+) -> None:
+    params.grafana_token = _first(
+        overrides.get("grafana_token"),
+        os.environ.get("AGENT_GRAFANA_TOKEN"),
+        "",
+    )
+    if params.grafana_url and not params.grafana_token:
+        params.grafana_token = prompter.secret(
+            "Grafana service-account token (Enter to skip / provision later)"
+        )
+    if not params.grafana_token:
+        params.grafana_annotations_enabled = False
+        if params.grafana_url:
+            report.decisions.append(
+                "No Grafana token -- annotations disabled until provisioned"
+            )
+    else:
+        params.grafana_annotations_enabled = True
 
 
 def _first(*values: Any) -> Any:
@@ -551,20 +777,3 @@ def _first(*values: Any) -> Any:
             continue
         return v
     return ""
-
-
-def _prompt(message: str, *, default: str = "") -> str:
-    suffix = f" [{default}]" if default else ""
-    try:
-        value = input(f"{message}{suffix}: ").strip()
-    except EOFError:
-        return default
-    return value or default
-
-
-def _prompt_secret(message: str, *, default: str = "") -> str:
-    try:
-        value = getpass.getpass(f"{message}: ").strip()
-    except EOFError:
-        return default
-    return value or default

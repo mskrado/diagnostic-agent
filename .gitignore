@@ -11,3 +11,6 @@ audit/
 eval/results/
 eval-results/
 .env
+# Locally generated `diag install` bundles
+deploy/
+deploy-*/

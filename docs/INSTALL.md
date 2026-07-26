@@ -21,9 +21,14 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 
 | Mode | When to use | How |
 |---|---|---|
-| **Interactive** (default) | First-time install on a laptop or bastion; you want guided prompts with sensible defaults | `diag install --output ./deploy` |
+| **Interactive** (default) | First-time install; **confirm every parameter** after discovery (Enter keeps defaults) | `diag install --output ./deploy` |
+| **Accept defaults** | Re-run against a stack you already trust; resolves interactively but never prompts | `diag install --output ./deploy --accept-defaults` |
 | **Non-interactive** | CI/CD, automation, remote unattended hosts | `diag install --output ./deploy --non-interactive --yes` plus flags/env for anything discovery cannot fill |
-| **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to either mode |
+| **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to any mode |
+
+If stdin is not a terminal (piped input, CI shell), interactive mode switches
+itself to non-interactive and says so, rather than silently accepting defaults.
+`Ctrl-C` at any prompt exits cleanly with code `130` and writes nothing.
 
 ### Resolution order
 
@@ -37,7 +42,8 @@ Then:
 
 4. **Interactive mode (default):** **confirm every parameter** — each value is
    shown with the candidate as the default; Enter accepts, or type a replacement.
-   Leaving a required field blank fails closed (unless `--allow-degraded`).
+   Input is validated (URL shape, port range, allowed choices) and re-asked on
+   error. Leaving a required field blank fails closed (unless `--allow-degraded`).
 5. **Non-interactive mode:** accept candidates as-is; missing required values
    fail closed (or degrade only with `--allow-degraded`).
 
@@ -59,14 +65,41 @@ diag install --output ./deploy
 
 1. **Discovery summary** — each supported tool marked `OK` or missing, with the
    URL that responded.
-2. **Confirm every parameter** — discovery / flags / env only supply defaults.
-   Interactive mode walks every setting (preset, Prometheus, Loki, Alertmanager,
-   webhook, Grafana, LLM, email, Grafana token). Enter keeps the default;
-   required blanks fail closed unless `--allow-degraded`.
-3. **Generation** — files written under `--output`.
-4. **Verify** — workspace + redaction + alert-rule sanity checks.
-5. **Next step** — open `APPLY.md` for how to merge rules into Prometheus /
-   Alertmanager and start the agent.
+2. **Confirm every parameter**, grouped into six numbered sections — discovery /
+   flags / env only supply defaults:
+
+   | Section | Covers |
+   |---|---|
+   | 1. Workspace preset | `generic-prometheus` vs `spring-micrometer` |
+   | 2. Observability endpoints | Prometheus, Loki |
+   | 3. Alert routing | Alertmanager + agent webhook URL |
+   | 4. Grafana annotations | Grafana URL (optional) |
+   | 5. Diagnosis LLM | provider, models, **credentials** |
+   | 6. Diagnostic email | SMTP host/port/addresses, then the Grafana token |
+
+3. **Container-reachability rewrite** — the installer probes from *your* host, so
+   a discovered `http://127.0.0.1:9090` would point at the agent container once
+   it runs. Interactive mode offers `http://host.docker.internal:9090` instead
+   (default yes) and the generated compose adds the matching
+   `host.docker.internal:host-gateway` mapping so it also works on Linux.
+4. **Reachability warning** — a URL you *change* is health-checked; a failure
+   warns and is recorded in `install-report.json` rather than blocking you.
+5. **Review summary** — every resolved value is printed before anything is
+   written. Answer `n` to walk the prompts again; `--yes` skips this step.
+6. **Verify**, then **next steps** with copy-pasteable commands.
+
+### Provider credentials are collected, not assumed
+
+Picking a provider interactively also collects what it needs to run:
+
+| Provider | Collected |
+|---|---|
+| `ollama` | base URL (with container rewrite) |
+| `openai` / `anthropic` / `google` | API key (hidden input; required unless `--allow-degraded`) |
+| `bedrock` | region + either explicit `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an explicit "use ambient credentials" answer that is recorded as a warning |
+
+This closes the case where choosing Bedrock produced an `agent/.env` with a
+Bedrock provider and no credentials.
 
 ### Interactive example
 
@@ -75,41 +108,56 @@ $ diag install --output ./deploy
 
 diag install - target=local output=./deploy
 
-Discovery
----------
-  [OK ] prometheus     http://127.0.0.1:9090
-  [OK ] loki           http://127.0.0.1:3100
+Discovery (6/9 reachable on local)
+----------------------------------
   [OK ] alertmanager   http://127.0.0.1:9093
-  [OK ] grafana        http://127.0.0.1:3000
-  [ - ] mailpit        (not found)
+  [OK ] grafana        http://127.0.0.1:3000  v11.0.0
+  [OK ] loki           http://127.0.0.1:3100
   [OK ] ollama         http://127.0.0.1:11434
+  [OK ] prometheus     http://127.0.0.1:9090
+  [ - ] mailpit        (not found)
+  placement: standalone_local
 
+[1/6] Workspace preset
+-----------------------
+  Selects PromQL templates and log label conventions.
 Metrics/logs preset [generic-prometheus/spring-micrometer] [generic-prometheus]:
+
+[2/6] Observability endpoints (agent reads these)
+--------------------------------------------------
+  Required: metrics are the primary diagnosis signal.
 Prometheus URL [http://127.0.0.1:9090]:
-Loki URL [http://127.0.0.1:3100]:
-Alertmanager URL [http://127.0.0.1:9093]:
-Alertmanager -> agent webhook URL [http://host.docker.internal:8001/webhook]:
-Grafana URL (Enter to skip annotations) [http://127.0.0.1:3000]:
-LLM provider [ollama/openai/bedrock/anthropic/google] [ollama]:
-Chat model [mistral:7b-instruct]:
-Embed model [nomic-embed-text]:
-Ollama base URL [http://127.0.0.1:11434]:
-Enable diagnostic email delivery? [y/N] [n]: n
-Grafana service-account token (Enter to keep existing / skip):
+  Loopback addresses point at the agent container, not your host.
+The agent runs in a container; use http://host.docker.internal:9090 instead? [Y/n]:
+...
+
+Review
+------
+  preset         generic-prometheus
+  prometheus     http://host.docker.internal:9090
+  loki           http://host.docker.internal:3100
+  alertmanager   http://host.docker.internal:9093
+  webhook        http://host.docker.internal:8001/webhook
+  grafana        http://host.docker.internal:3000
+  grafana token  (none)
+  chat           ollama/mistral:7b-instruct
+  embeddings     ollama/nomic-embed-text
+  email          (disabled)
+Write the install bundle with these settings? [Y/n]:
 
 Wrote 21 file(s)
-  - interactive confirm: every parameter
-  - auto-preset -> generic-prometheus
-  - LLM seed -> ollama at http://127.0.0.1:11434
-  - LLM confirmed -> ollama/mistral:7b-instruct
-  - placement=standalone_local webhook=http://host.docker.internal:8001/webhook
+  ...
 
 verify OK
-Next: read deploy/APPLY.md
-```
 
-In this run discovery filled the defaults; interactive mode still confirmed each
-parameter (Enter accepted the discovered values).
+Next steps
+----------
+  1. Review   deploy/install-report.json
+  2. Edit     deploy/agent/workspace/service_map.yaml
+  3. Start    cd deploy/agent && docker compose --env-file .env up -d
+  4. Health   curl -sf http://127.0.0.1:8001/health
+  5. Wire     merge deploy/observability into your live stack
+```
 
 ### Interactive + remote discovery
 
@@ -200,8 +248,9 @@ reloading a live Prometheus/Alertmanager.
 | `--dry-run` | No | off | Print plan; write nothing |
 | `--force` | No | off | Allow replacing differing files (always keeps `*.bak.<utc>` backups) |
 | `--non-interactive` | No | off | Never prompt |
+| `--accept-defaults` | No | off | Resolve interactively but accept every default without prompting |
 | `--allow-degraded` | No | off | Permit metrics-only / no AM webhook / blind Ollama fallback; default is fail closed |
-| `--yes` / `-y` | No | off | Confirm `--apply` without asking |
+| `--yes` / `-y` | No | off | Skip the review confirmation and the `--apply` prompt |
 | `--apply` | No | off | Best-effort `POST /-/reload` on Prometheus & Alertmanager |
 | `--start` | No | off | `docker compose up -d` in `agent/` + `/health` probe |
 

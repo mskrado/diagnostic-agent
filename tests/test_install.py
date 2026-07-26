@@ -132,7 +132,27 @@ def test_collect_fail_closed_without_loki_or_alertmanager(monkeypatch):
         )
 
 
-def test_collect_prompts_for_missing_required_urls(monkeypatch):
+@pytest.fixture
+def no_llm_env(monkeypatch):
+    for name in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "DIAGNOSTIC_AGENT_AWS_ACCESS_KEY_ID",
+        "AGENT_GRAFANA_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def no_probe(monkeypatch):
+    """Endpoint reachability checks must not touch the network in unit tests."""
+    monkeypatch.setattr("app.install.collect._probe_ok", lambda *_a, **_k: True)
+
+
+def test_collect_prompts_for_missing_required_urls(monkeypatch, no_llm_env, no_probe):
     """Interactive mode must ask for required params discovery did not fill."""
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix()
@@ -147,22 +167,15 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch):
             "ollama",  # LLM provider
             "",  # chat model default
             "",  # embed model default
-            "http://127.0.0.1:11434",  # ollama base
+            "http://ollama:11434",  # ollama base (non-loopback: no rewrite prompt)
             "n",  # no email
+            "y",  # accept review
         ]
     )
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
     monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
-    params = collect(
-        report,
-        non_interactive=False,
-        preset="generic-prometheus",
-    )
+    params = collect(report, non_interactive=False, preset="generic-prometheus")
     assert params.prometheus_url == "http://prom:9090"
     assert params.loki_url == "http://loki:3100"
     assert params.alertmanager_url == "http://am:9093"
@@ -176,38 +189,167 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch):
     assert any("Alertmanager URL confirmed" in d for d in report.decisions)
 
 
-def test_collect_confirms_discovered_defaults(monkeypatch):
+def _discovered_report() -> DiscoveryReport:
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix(
+        agent_to_prometheus="http://prometheus:9090",
+        agent_to_loki="http://loki:3100",
+        agent_to_alertmanager="http://alertmanager:9093",
+        agent_to_grafana="http://grafana:3000",
+        alertmanager_to_agent_webhook="http://diagnostic-agent:8000/webhook",
+    )
+    report.tools = [
+        ToolEndpoint(
+            kind=ToolKind.OLLAMA, reachable=True, url="http://ollama:11434"
+        ),
+    ]
+    return report
+
+
+def test_collect_confirms_discovered_defaults(monkeypatch, no_llm_env, no_probe):
     """Interactive install confirms every param even when discovery filled them."""
+    report = _discovered_report()
+    # Enter on every prompt -> keep discovered defaults.
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: "")
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
+
+    params = collect(report, non_interactive=False, preset="auto")
+    assert params.prometheus_url == "http://prometheus:9090"
+    assert params.loki_url == "http://loki:3100"
+    assert params.alertmanager_url == "http://alertmanager:9093"
+    assert params.grafana_url == "http://grafana:3000"
+    assert params.webhook_url == "http://diagnostic-agent:8000/webhook"
+    assert params.chat_provider == "ollama"
+    assert any("interactive confirm: every parameter" in d for d in report.decisions)
+    assert any("LLM confirmed" in d for d in report.decisions)
+
+
+def test_accept_defaults_skips_prompts(no_llm_env, no_probe):
+    """--accept-defaults resolves everything without reading stdin."""
+    report = _discovered_report()
+
+    def _explode(*_a, **_k):  # pragma: no cover - must never run
+        raise AssertionError("accept_defaults must not prompt")
+
+    import builtins
+
+    original = builtins.input
+    builtins.input = _explode
+    try:
+        params = collect(report, non_interactive=False, accept_defaults=True)
+    finally:
+        builtins.input = original
+
+    assert params.prometheus_url == "http://prometheus:9090"
+    assert params.loki_url == "http://loki:3100"
+    assert params.chat_provider == "ollama"
+
+
+def test_loopback_endpoint_rewritten_for_container(monkeypatch, no_llm_env, no_probe):
+    """Loopback URLs are offered a host.docker.internal rewrite (default yes)."""
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix(
         agent_to_prometheus="http://127.0.0.1:9090",
         agent_to_loki="http://127.0.0.1:3100",
         agent_to_alertmanager="http://127.0.0.1:9093",
-        agent_to_grafana="http://127.0.0.1:3000",
         alertmanager_to_agent_webhook="http://host.docker.internal:8001/webhook",
     )
-    report.tools = [
-        ToolEndpoint(
-            kind=ToolKind.OLLAMA,
-            reachable=True,
-            url="http://127.0.0.1:11434",
-        ),
-    ]
-    # Enter on every prompt -> keep discovered defaults.
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: "")
     monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+
+    params = collect(
+        report,
+        non_interactive=False,
+        preset="generic-prometheus",
+        overrides={"chat_provider": "ollama"},
+    )
+    assert params.prometheus_url == "http://host.docker.internal:9090"
+    assert params.loki_url == "http://host.docker.internal:3100"
+    assert any("rewritten for container" in d for d in report.decisions)
+
+
+def test_bedrock_requires_credential_decision(monkeypatch, no_llm_env, no_probe):
+    """Choosing bedrock interactively must resolve credentials explicitly."""
+    report = _discovered_report()
+    report.tools = []  # no Ollama -> provider prompt starts from ollama default
+    answers = iter(
+        [
+            "generic-prometheus",
+            "",  # prometheus
+            "",  # loki
+            "",  # alertmanager
+            "",  # webhook
+            "",  # grafana
+            "bedrock",  # provider
+            "us-east-1",  # region
+            "",  # chat model
+            "",  # embed model
+            "n",  # do NOT use ambient credentials -> prompt for keys
+            "n",  # no email
+            "y",  # accept review
+        ]
+    )
+    secrets = iter(["AKIAEXAMPLE", "secret-value", ""])
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: next(secrets))
+
+    params = collect(report, non_interactive=False, preset="generic-prometheus")
+    assert params.chat_provider == "bedrock_converse"
+    assert params.aws_access_key_id == "AKIAEXAMPLE"
+    assert params.aws_secret_access_key == "secret-value"
+    assert any("explicit AWS keys" in d for d in report.decisions)
+
+
+def test_bedrock_ambient_credentials_warn(monkeypatch, no_llm_env, no_probe):
+    """Ambient AWS credentials are allowed but must surface a warning."""
+    report = _discovered_report()
+    report.tools = []
+    answers = iter(
+        [
+            "generic-prometheus",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "bedrock",
+            "eu-west-1",
+            "",
+            "",
+            "y",  # use ambient credentials
+            "n",  # no email
+            "y",  # accept review
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
+
+    params = collect(report, non_interactive=False, preset="generic-prometheus")
+    assert params.chat_provider == "bedrock_converse"
+    assert params.aws_access_key_id == ""
+    assert any("No AWS keys in agent/.env" in w for w in report.warnings)
+    assert '"region_name": "eu-west-1"' in params.chat_model_kwargs
+
+
+def test_review_decline_restarts_collection(monkeypatch, no_llm_env, no_probe):
+    """Declining the review summary re-runs the prompts."""
+    report = _discovered_report()
+    answers = iter(
+        [
+            # round 1
+            "generic-prometheus", "", "", "", "", "", "ollama", "", "", "", "n",
+            "n",  # decline review
+            # round 2
+            "spring-micrometer", "", "", "", "", "", "ollama", "", "", "", "n",
+            "y",  # accept review
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
 
     params = collect(report, non_interactive=False, preset="auto")
-    assert params.prometheus_url == "http://127.0.0.1:9090"
-    assert params.loki_url == "http://127.0.0.1:3100"
-    assert params.alertmanager_url == "http://127.0.0.1:9093"
-    assert params.grafana_url == "http://127.0.0.1:3000"
-    assert params.webhook_url == "http://host.docker.internal:8001/webhook"
-    assert params.chat_provider == "ollama"
-    assert any("interactive confirm: every parameter" in d for d in report.decisions)
-    assert any("LLM confirmed" in d for d in report.decisions)
+    assert params.preset == "spring-micrometer"
+    assert any("re-entered parameters at review" in d for d in report.decisions)
 
 
 def test_collect_degrades_with_allow_degraded(monkeypatch):
@@ -338,6 +480,41 @@ def test_verify_rejects_incomplete_bundle_without_allow_degraded(tmp_path: Path)
     assert any("AGENT_LOKI_URL" in e for e in errors)
     assert any("route.generated.yml" in e for e in errors)
     assert verify(out, allow_degraded=True) == []
+
+
+def test_compose_declares_host_gateway_for_loopback_rewrite(tmp_path: Path):
+    """host.docker.internal needs an explicit host-gateway mapping on Linux."""
+    report = _complete_report()
+    report.reachability.agent_to_prometheus = "http://host.docker.internal:9090"
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="generic-prometheus",
+        overrides={
+            "chat_provider": "ollama",
+            "prometheus_url": "http://host.docker.internal:9090",
+        },
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    compose = (out / "agent" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert 'host.docker.internal:host-gateway' in compose
+
+
+def test_compose_omits_host_gateway_without_loopback(tmp_path: Path):
+    report = _complete_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="generic-prometheus",
+        overrides={"chat_provider": "ollama"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    compose = (out / "agent" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "host-gateway" not in compose
 
 
 def test_generate_dry_run_writes_nothing(tmp_path: Path):

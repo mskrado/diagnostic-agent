@@ -9,6 +9,7 @@ from .collect import collect
 from .discover import discover
 from .generate import generate
 from .models import DiscoveryReport
+from .prompt import PromptAborted
 from .verify import verify
 
 
@@ -91,10 +92,18 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument(
+        "--accept-defaults",
+        action="store_true",
+        help=(
+            "Resolve interactively but accept every discovered default without "
+            "prompting (fast re-run against a known stack)"
+        ),
+    )
+    p.add_argument(
         "--yes",
         "-y",
         action="store_true",
-        help="Confirm destructive apply actions without prompting",
+        help="Skip the review confirmation and any --apply prompt",
     )
     p.add_argument(
         "--apply",
@@ -116,7 +125,24 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run_install(args: argparse.Namespace) -> int:
+    try:
+        return _run_install(args)
+    except KeyboardInterrupt:
+        print("\nAborted by operator; nothing was written.", file=sys.stderr)
+        return 130
+
+
+def _run_install(args: argparse.Namespace) -> int:
     print(f"diag install - target={args.target} output={args.output}")
+
+    non_interactive = args.non_interactive
+    if not non_interactive and not args.accept_defaults and not sys.stdin.isatty():
+        print(
+            "stdin is not a terminal -- switching to non-interactive mode "
+            "(pass --accept-defaults to resolve from discovery instead)."
+        )
+        non_interactive = True
+
     report: DiscoveryReport = discover(
         target=args.target, ssh=args.ssh, timeout=args.timeout
     )
@@ -126,7 +152,7 @@ def run_install(args: argparse.Namespace) -> int:
     if report.errors and not args.prometheus_url:
         for err in report.errors:
             print(f"ERROR: {err}", file=sys.stderr)
-        if args.non_interactive:
+        if non_interactive:
             print(
                 "\nDiscovery failed. Fix connectivity or pass --prometheus-url.",
                 file=sys.stderr,
@@ -152,11 +178,14 @@ def run_install(args: argparse.Namespace) -> int:
         params = collect(
             report,
             preset=args.preset,
-            non_interactive=args.non_interactive,
+            non_interactive=non_interactive,
             allow_degraded=args.allow_degraded,
+            accept_defaults=args.accept_defaults,
+            assume_yes=args.yes,
+            probe_timeout=args.timeout,
             overrides=overrides,
         )
-    except ValueError as exc:
+    except (ValueError, PromptAborted) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
@@ -182,12 +211,12 @@ def run_install(args: argparse.Namespace) -> int:
             print(f"  - {e}", file=sys.stderr)
         return 1
     print("\nverify OK")
-    print(f"Next: read {output / 'APPLY.md'}")
+    _print_next_steps(output, params, report)
 
     if args.apply:
         from .apply import apply_reloads
 
-        if not args.yes and not args.non_interactive:
+        if not args.yes and not non_interactive:
             confirm = input(
                 "Reload Prometheus/Alertmanager configs on the live stack? [y/N]: "
             )
@@ -216,11 +245,38 @@ def run_install(args: argparse.Namespace) -> int:
 
 
 def _print_discovery(report: DiscoveryReport) -> None:
-    print("\nDiscovery")
-    print("---------")
-    for tool in report.tools:
+    tools = sorted(report.tools, key=lambda t: (not t.reachable, t.kind.value))
+    found = sum(1 for t in tools if t.reachable)
+    header = f"Discovery ({found}/{len(tools)} reachable on {report.target})"
+    print(f"\n{header}")
+    print("-" * len(header))
+    for tool in tools:
         mark = "OK " if tool.reachable else " - "
-        extra = tool.url or "(not found)"
-        print(f"  [{mark}] {tool.kind.value:<14} {extra}")
+        detail = tool.url or "(not found)"
+        if tool.reachable and tool.version:
+            detail = f"{detail}  v{tool.version}"
+        print(f"  [{mark}] {tool.kind.value:<14} {detail}")
     for w in report.warnings:
         print(f"  ! {w}")
+    print(f"  placement: {report.reachability.agent_placement}")
+
+
+def _print_next_steps(
+    output: Path, params: object, report: DiscoveryReport
+) -> None:
+    """Print copy-pasteable commands instead of only pointing at APPLY.md."""
+    print("\nNext steps")
+    print("----------")
+    print(f"  1. Review   {output / 'install-report.json'}")
+    print(f"  2. Edit     {output / 'agent' / 'workspace' / 'service_map.yaml'}")
+    print(f"  3. Start    cd {output / 'agent'} && docker compose --env-file .env up -d")
+    print(
+        f"  4. Health   curl -sf http://127.0.0.1:"
+        f"{getattr(params, 'agent_host_port', 8001)}/health"
+    )
+    print(f"  5. Wire     merge {output / 'observability'} into your live stack")
+    print(f"\nFull instructions: {output / 'APPLY.md'}")
+    if report.warnings:
+        print("\nWarnings to resolve before the agent can diagnose:")
+        for w in report.warnings:
+            print(f"  ! {w}")
