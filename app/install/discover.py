@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -26,6 +26,39 @@ from .models import (
     ToolEndpoint,
     ToolKind,
 )
+from .progress import NullDiscoveryProgress
+
+
+class _Progress(Protocol):
+    def start(self) -> None: ...
+    def phase(self, name: str) -> None: ...
+    def ensure_tools(self, kinds: list[ToolKind]) -> None: ...
+    def found_container(self, kind: ToolKind, container_name: str) -> None: ...
+    def probing(self, kind: ToolKind, url: str) -> None: ...
+    def result(
+        self,
+        kind: ToolKind,
+        *,
+        reachable: bool,
+        url: str = "",
+        version: str = "",
+    ) -> None: ...
+    def finish(self, *, placement: str = "") -> None: ...
+    def close(self) -> None: ...
+
+
+# Tools always shown on the status chart (even before Docker finds them).
+_CHART_KINDS: tuple[ToolKind, ...] = (
+    ToolKind.PROMETHEUS,
+    ToolKind.LOKI,
+    ToolKind.ALERTMANAGER,
+    ToolKind.GRAFANA,
+    ToolKind.TEMPO,
+    ToolKind.OLLAMA,
+    ToolKind.MAILPIT,
+    ToolKind.NODE_EXPORTER,
+    ToolKind.CADVISOR,
+)
 
 
 def discover(
@@ -33,25 +66,50 @@ def discover(
     target: str = "local",
     ssh: str | None = None,
     timeout: float = 3.0,
+    progress: _Progress | None = None,
 ) -> DiscoveryReport:
     """Run full discovery and return a populated :class:`DiscoveryReport`."""
+    progress = progress or NullDiscoveryProgress()
     report = DiscoveryReport(target=target)
-    containers = _discover_docker_containers(ssh=ssh)
-    if containers:
-        report.decisions.append(
-            f"docker introspection: {len(containers)} running container(s)"
-            + (f" via ssh {ssh}" if ssh else " (local)")
-        )
-        report.tools.extend(_tools_from_containers(containers))
-    else:
-        report.warnings.append(
-            "docker introspection unavailable -- falling back to HTTP/port probes"
-        )
+    progress.start()
+    try:
+        progress.phase("docker introspection")
+        progress.ensure_tools(list(_CHART_KINDS))
+        containers = _discover_docker_containers(ssh=ssh)
+        if containers:
+            report.decisions.append(
+                f"docker introspection: {len(containers)} running container(s)"
+                + (f" via ssh {ssh}" if ssh else " (local)")
+            )
+            tools = _tools_from_containers(containers)
+            report.tools.extend(tools)
+            for tool in tools:
+                progress.found_container(tool.kind, tool.container_name)
+            progress.phase(f"docker: {len(containers)} container(s)")
+        else:
+            report.warnings.append(
+                "docker introspection unavailable -- falling back to HTTP/port probes"
+            )
+            progress.phase("docker unavailable — HTTP probes")
 
-    _probe_http_layers(report, target=target, timeout=timeout)
-    _fill_missing_from_port_scan(report, target=target, timeout=timeout)
-    report.reachability = _build_reachability(report, target=target)
-    _validate_minimum(report)
+        _probe_http_layers(report, target=target, timeout=timeout, progress=progress)
+        _fill_missing_from_port_scan(
+            report, target=target, timeout=timeout, progress=progress
+        )
+        # Anything still not marked reachable is a miss.
+        for tool in report.tools:
+            if not tool.reachable:
+                progress.result(tool.kind, reachable=False)
+        for kind in _CHART_KINDS:
+            if report.tool(kind) is None:
+                progress.result(kind, reachable=False)
+
+        report.reachability = _build_reachability(report, target=target)
+        _validate_minimum(report)
+        progress.finish(placement=report.reachability.agent_placement)
+    except Exception:
+        progress.close()
+        raise
     return report
 
 
@@ -152,7 +210,11 @@ def _parse_published_port(ports_raw: str, preferred_container_port: int | None) 
 # HTTP probing
 # ---------------------------------------------------------------------------
 def _probe_http_layers(
-    report: DiscoveryReport, *, target: str, timeout: float
+    report: DiscoveryReport,
+    *,
+    target: str,
+    timeout: float,
+    progress: _Progress,
 ) -> None:
     """Probe existing tool entries and create host/remote candidates."""
     host = _target_host(target)
@@ -169,6 +231,8 @@ def _probe_http_layers(
     ):
         if report.tool(kind) is None:
             report.tools.append(ToolEndpoint(kind=kind))
+
+    progress.ensure_tools([t.kind for t in report.tools])
 
     for tool in list(report.tools):
         paths = HEALTH_PATHS.get(tool.kind, [])
@@ -199,10 +263,12 @@ def _probe_http_layers(
 
         # Deduplicate while preserving order.
         seen_urls: set[str] = set()
+        reached = False
         for url, mode in candidates:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
+            progress.probing(tool.kind, url)
             ok, version, detail = _http_probe(url, paths, timeout=timeout)
             if ok:
                 tool.reachable = True
@@ -211,8 +277,15 @@ def _probe_http_layers(
                 tool.version = version
                 tool.confidence = "high"
                 tool.notes.append(detail)
+                progress.result(
+                    tool.kind, reachable=True, url=url, version=version
+                )
+                reached = True
                 break
             tool.notes.append(detail)
+        if not reached:
+            # Leave as waiting — port scan / finish will mark not-found.
+            progress.probing(tool.kind, "(no answer yet)")
 
 
 def _http_probe(
@@ -250,10 +323,15 @@ def _http_probe(
 
 
 def _fill_missing_from_port_scan(
-    report: DiscoveryReport, *, target: str, timeout: float
+    report: DiscoveryReport,
+    *,
+    target: str,
+    timeout: float,
+    progress: _Progress,
 ) -> None:
     """Last-chance: probe well-known ports that have no successful URL yet."""
     host = _target_host(target)
+    progress.phase("port scan")
     for kind, port in DEFAULT_PORTS.items():
         tool = report.tool(kind)
         if tool and tool.reachable:
@@ -261,6 +339,7 @@ def _fill_missing_from_port_scan(
         if kind not in HEALTH_PATHS:
             continue
         url = f"http://{host}:{port}"
+        progress.probing(kind, url)
         ok, version, detail = _http_probe(url, HEALTH_PATHS[kind], timeout=timeout)
         if not ok:
             continue
@@ -278,6 +357,7 @@ def _fill_missing_from_port_scan(
         tool.published_port = port
         tool.confidence = "medium"
         tool.notes.append(detail)
+        progress.result(kind, reachable=True, url=url, version=version)
 
 
 def _target_host(target: str) -> str:
