@@ -1,0 +1,96 @@
+# Close Issues on Devel Merge
+
+# Close issues linked via Closes/Fixes/Resolves when a PR merges into devel.
+# GitHub's native auto-close only fires on the default branch (main); our feature
+# PRs target devel, so this workflow provides the same semantics there.
+
+name: Close Issues on Devel Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [devel]
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  close-linked-issues:
+    name: Close linked issues
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close issues from PR closing keywords
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const text = `${pr.title || ''}\n${pr.body || ''}`;
+
+            const keyword = String.raw`(?:close[sd]?|fixe?[sd]?|resolve[sd]?)`;
+            const hashList = String.raw`#\d+(?:\s*(?:,|\band\b)\s*#\d+)*`;
+            const urlIssue = String.raw`https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)`;
+            const patterns = [
+              new RegExp(`${keyword}\\s*:?\\s*(${hashList})`, 'gi'),
+              new RegExp(`${keyword}\\s*:?\\s*${urlIssue}`, 'gi'),
+            ];
+
+            const issueNumbers = new Set();
+            for (const re of patterns) {
+              for (const match of text.matchAll(re)) {
+                if (match[1].startsWith('#')) {
+                  for (const id of match[1].matchAll(/#(\d+)/g)) {
+                    issueNumbers.add(Number(id[1]));
+                  }
+                } else {
+                  issueNumbers.add(Number(match[1]));
+                }
+              }
+            }
+
+            if (issueNumbers.size === 0) {
+              core.info('No closing-keyword issue references found; nothing to close.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prUrl = pr.html_url;
+            const comment =
+              `Closed automatically when [#${pr.number}](${prUrl}) merged into \`devel\`.`;
+
+            for (const number of [...issueNumbers].sort((a, b) => a - b)) {
+              let issue;
+              try {
+                ({ data: issue } = await github.rest.issues.get({ owner, repo, issue_number: number }));
+              } catch (err) {
+                core.warning(`Issue #${number}: ${err.message}`);
+                continue;
+              }
+
+              if (issue.pull_request) {
+                core.info(`#${number} is a pull request; skipping.`);
+                continue;
+              }
+              if (issue.state === 'closed') {
+                core.info(`#${number} already closed; skipping.`);
+                continue;
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: number,
+                body: comment,
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.info(`Closed #${number}.`);
+            }
