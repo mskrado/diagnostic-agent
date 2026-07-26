@@ -2,6 +2,21 @@
 
 Thanks for helping improve diagnostic-agent.
 
+## SDLC (everyone follows this)
+
+Work flows **issue → `feature/<slug>-<n>` → PR into `devel` → release PR `devel`→`main` → publish**.
+
+Full guide: **[docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md)**. Agents use the same contract via `.cursor/rules/requirements-workflow.mdc`.
+
+Short rules:
+
+- No code without a GitHub issue
+- Branch from `devel`; name must include the issue number (`feature/my-change-12`)
+- Feature PRs target **`devel` only** (never `main`)
+- Link the issue (`Closes #n` in the PR body; `(#n)` in the title)
+- Every commit is DCO signed: `git commit -s`
+- Squash-merge; wait for green CI; do not self-merge protected branches
+
 ## The contribution loop (preferred)
 
 To add a diagnostic capability, submit **all three**:
@@ -59,3 +74,4 @@ This certifies the contribution under the [DCO 1.1](https://developercertificate
 - Include tests for new Python modules
 - Update `docs/INTEGRATING.md` if the profile schema changes, and
   `docs/WORKSPACE.md` if the workspace manifest changes
+- Note release/host impact in the PR template when a publish or host pin bump is needed

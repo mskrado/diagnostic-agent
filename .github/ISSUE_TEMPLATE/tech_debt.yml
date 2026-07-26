@@ -1,0 +1,26 @@
+---
+name: Tech debt
+description: Refactoring or deferred scope from a prior PR/issue
+title: "[tech-debt] "
+labels: ["type:tech-debt"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What was deferred and why?
+      placeholder: Deferred from #N / PR #M — …
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know this is done?
+    validations:
+      required: true
+  - type: input
+    id: origin
+    attributes:
+      label: Origin issue or PR
+      placeholder: "#12 or https://github.com/mskrado/diagnostic-agent/pull/12"

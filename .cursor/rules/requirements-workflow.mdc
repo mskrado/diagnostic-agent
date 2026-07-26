@@ -1,0 +1,74 @@
+---
+description: How requirements, issues, branches, PRs, and releases flow through GitHub for diagnostic-agent. Same practice as publishi.ai, adapted for this repo. Full reference: docs/SDLC_GUIDE.md.
+alwaysApply: true
+---
+
+# Requirements & Issue Workflow
+
+GitHub Issues are the single source of truth. Every change traces back to an issue. Agents drive this with `gh`/`git` (the same objects humans see in the portal). Full reference: `docs/SDLC_GUIDE.md`.
+
+## The contract (do not skip)
+
+1. **No code without an issue.** If none exists, create one first and state its number.
+
+```bash
+gh issue create --title "[area] short description" \
+  --label "type:feature,area:core,status:ready" --body-file -
+```
+
+2. **Respect the status gate.** Do NOT branch while the issue is `status:needs-spec`. Land/link the spec and relabel to `status:ready` first. Corpus-only or typo docs may go straight to `status:ready`.
+3. **One atomic task per branch/PR.** Branch from `devel`; open a **draft PR early** with **base `devel`** (never `main` for feature work). Prefer `feature/<slug>-<issue>` so the branch name includes the issue number.
+
+```bash
+git checkout devel && git pull && git checkout -b feature/<slug>-<issue>
+gh pr create --draft --base devel --head feature/<slug>-<issue> \
+  --title "[area] description (#<issue>)" --body "Closes #<issue>"
+```
+
+4. **Branch names include the issue number.** Feature (and `fix/` / `perf/`) branches **must** end with `-<issue>` (e.g. `feature/sdlc-guide-9`, `fix/redaction-12`). Do not create `feature/<slug>` without the issue suffix.
+5. **Print a session summary before starting work (mandatory for agents).** After the issue exists (and the draft PR / branch when available), and **before** making code or docs changes, print this block:
+
+| | |
+|---|---|
+| **Issue** | `https://github.com/mskrado/diagnostic-agent/issues/<n>` |
+| **Draft PR** | `#<pr>` (or full PR URL) |
+| **Branch** | `feature/<slug>-<n>` |
+
+    If the draft PR is not open yet, print **Draft PR** as `(creating…)` and update/reprint once `gh pr create` returns. Re-print when resuming an existing issue/PR mid-session.
+6. **Branch targets.** Feature PRs merge to **`devel` only**. **`main` receives merges from `devel` only** (release PR behind a Release Checklist issue). Do not retarget a feature PR to `main` to skip integration.
+7. **Always link.** PR title contains `(#<issue>)`; body contains `Closes #<issue>` (or `Refs #` for partial work). Fill the PR template. **DCO:** every commit must use `git commit -s`.
+8. **Wait for green CI.** Never request merge on red (`ci.yml`, `dco.yml`).
+
+```bash
+gh pr ready && gh pr checks --watch
+```
+
+9. **Never self-merge protected branches** (`main`, `devel`). Request review.
+10. **Record release impact** in the PR template: GHCR/PyPI publish needed after `devel`→`main`, and whether host repos must bump the image / `agent_version` pin.
+11. **Close the loop.** `Closes #` auto-closes when the feature PR merges into **`devel`** (workflow `close-issues-on-devel-merge.yml`). For deferred work open `type:tech-debt`; for QA defects open `type:bug` — do NOT reopen a merged PR.
+12. **Commit finished work to the linked PR (mandatory for agents).** When the task (or a coherent slice) is done, **do not leave hanging uncommitted files**. Agents must:
+    - Commit in-scope changes on the feature branch with `git commit -s`.
+    - Push to the remote branch that backs the **draft/open PR** linked to that issue.
+    - If unrelated WIP appeared, **do not dump it onto the wrong PR** — open a **new issue + branch + draft PR** for each coherent leftover.
+    - End the session only when `git status` is clean for in-scope work (or leftovers are parked). Ask the user before committing only when a repo/user rule requires an explicit commit request; otherwise treat "finish the task" as authority to commit and push to the linked PR.
+
+## Labels
+
+`type:{feature,bug,tech-debt,docs}` · `area:{core,corpus,install,ci,docs}` · `priority:P0..P3` · `status:{needs-spec,ready,in-progress,blocked}`.
+
+## Release
+
+Production publishes go **`devel` → `main`** behind a **Release Checklist** issue — the only path into `main`. Merge updates `main` only; then run Release explicitly:
+
+```bash
+gh workflow run release.yml --ref main -f tag=0.2.0
+# or: git tag v0.2.0 && git push origin v0.2.0
+```
+
+```bash
+gh pr create --base main --head devel \
+  --title "Release: <version> (devel → main)" \
+  --body "Release checklist: #<release-issue>"
+```
+
+Host workspace / image-pin changes belong in the **host** repository (e.g. publishi.ai), not as a re-vendor of this agent.

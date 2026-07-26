@@ -195,5 +195,7 @@ Apache-2.0 — see [LICENSE](LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The preferred contribution is a **runbook +
-eval case + scenario** that CI can lint without LLM credentials.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the shared lifecycle guide
+**[docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md)** (issue → `feature/<slug>-<n>` → `devel` →
+release). The preferred contribution is a **runbook + eval case + scenario** that
+CI can lint without LLM credentials.
