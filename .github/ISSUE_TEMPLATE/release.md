@@ -25,7 +25,8 @@ labels: ["release"]
 ## Publish
 
 - [ ] PR merged to `main`
-- [ ] `release.yml` succeeded (GHCR push; PyPI on `v*` tag) **or** tag `vX.Y.Z` pushed
+- [ ] `release.yml` run from `main` (`-f bump=patch|minor|major`) **or** tag `vX.Y.Z` pushed
+- [ ] `release.yml` succeeded (GHCR push, wheel, git tag, GitHub Release)
 - [ ] `ghcr.io/mskrado/diagnostic-agent:X.Y.Z` pullable
 
 ## Follow-up

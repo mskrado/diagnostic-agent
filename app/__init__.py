@@ -6,4 +6,11 @@ local-first LLM, and emits a structured diagnostic report. Hypotheses only --
 no auto-remediation.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    # Release stamps pyproject.toml, so the installed distribution is the single
+    # source of truth — a literal here silently drifts from the published tag.
+    __version__ = version("diagnostic-agent")
+except PackageNotFoundError:  # source tree without an install
+    __version__ = "unknown"

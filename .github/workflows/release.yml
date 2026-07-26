@@ -1,13 +1,36 @@
+# Release pipeline.
+#
+# Triggers (both supported):
+#   1. Tag push — `git tag v1.2.3 && git push origin v1.2.3`
+#                 The pushed tag IS the version. No new tag is created.
+#   2. Manual   — Actions -> Release -> Run workflow -> pick patch|minor|major.
+#                 The next semver is computed from the latest v* tag and the
+#                 git tag is created at the end, once publishing succeeded.
+#
+# Versioning convention:
+#   - git tags:   v-prefixed (v1.2.3) — the release marker
+#   - image tags: bare semver (1.2.3) + sha-<short> + latest
+#   - the resolved version is stamped into pyproject.toml before build, so the
+#     wheel, `diag version`, and the audit record's agent_version all agree with
+#     the tag. The stamp is never committed; devel keeps its development version.
+
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Image/package tag (e.g. 0.1.0)"
-        required: true
+      bump:
+        description: 'Version bump (manual runs only; tag pushes use the pushed tag)'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: read
@@ -17,17 +40,66 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the git tag + GitHub Release on manual runs
+      packages: write
+      id-token: write
+    env:
+      # secrets.* cannot be used in `if:`, so map it here.
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # version-next.sh reads the tag history
 
       - name: Resolve version
         id: ver
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            CREATE_TAG=false
           else
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            if [ "$GITHUB_REF_NAME" != "main" ]; then
+              echo "::error::Releases publish from main only (got '$GITHUB_REF_NAME'). Merge devel -> main first."
+              exit 1
+            fi
+            VERSION="$(bash scripts/version-next.sh)"
+            CREATE_TAG=true
           fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version '$VERSION' (expected MAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+          if [ "$CREATE_TAG" = true ] && git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Tag v${VERSION} already exists — nothing to release"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "create_tag=$CREATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice::Release version $VERSION (create_tag=$CREATE_TAG)"
+
+      - name: Stamp version into the package
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - "$VERSION" <<'PY'
+          import pathlib, re, sys
+
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text(encoding="utf-8")
+          stamped, count = re.subn(
+              r'(?m)^version = ".*"$', f'version = "{sys.argv[1]}"', text, count=1
+          )
+          if count != 1:
+              sys.exit("no version line in pyproject.toml - refusing to publish an unstamped build")
+          path.write_text(stamped, encoding="utf-8")
+          PY
+          grep -E '^version = ' pyproject.toml
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -46,6 +118,11 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.sha_tag }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - uses: actions/setup-python@v5
         with:
@@ -57,8 +134,26 @@ jobs:
           python -m build
 
       - name: Publish to PyPI
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.PYPI_API_TOKEN != ''
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
         continue-on-error: true
+
+      - name: Create and push git tag (manual dispatch only)
+        if: steps.ver.outputs.create_tag == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Release v${{ steps.ver.outputs.version }}
+          generate_release_notes: true
