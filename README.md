@@ -11,6 +11,33 @@ a pluggable LLM, and emits a structured diagnostic report.
 Integrating into *any* project means supplying a **workspace** — configuration
 and content that live in *your* repository — **not** forking this codebase.
 
+## Contents
+
+In this README:
+
+- [Quick start — install against your stack](#quick-start--install-against-your-stack) — generate an agent + wiring bundle with `diag install`
+- [Quick start (hello-world workspace)](#quick-start-hello-world-workspace) — run the agent locally or in Docker against the bundled example
+- [Host workspace](#host-workspace) — manifest, profile files, preset chain, [fail-closed redaction](#redaction-is-fail-closed)
+- [Architecture](#architecture) — alert → LangGraph pipeline → report
+- [Configuration](#configuration) — every `AGENT_` environment variable
+- [Tools](#tools) — `diag validate` / `lint` / `doctor` / `e2e` / `eval` / `serve`
+- [Develop](#develop) — local environment and test run
+- [License](#license) · [Contributing](#contributing)
+
+Additional documentation:
+
+| Document | Covers |
+|---|---|
+| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
+| [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
+| [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
+| [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
+| [eval/README.md](eval/README.md) | Blind eval: what "blind" means, how logs are injected, scoring against ground truth |
+| [docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md) | Contribution lifecycle: environments, branching, issue workflow, CI/CD, release |
+| [SECURITY.md](SECURITY.md) | Supported versions, vulnerability reporting, threat model notes |
+| [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to propose changes and the community expectations |
+| [`examples/hello-world/`](examples/hello-world/) · [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) | Reference workspaces to copy and adapt |
+
 ## Quick start — install against your stack
 
 Discover running observability tools and generate a complete agent + wiring
