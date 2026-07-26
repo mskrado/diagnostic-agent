@@ -9,6 +9,7 @@ from .collect import collect
 from .discover import discover
 from .generate import generate
 from .models import DiscoveryReport
+from .progress import make_progress
 from .prompt import PromptAborted
 from .verify import verify
 
@@ -143,11 +144,22 @@ def _run_install(args: argparse.Namespace) -> int:
         )
         non_interactive = True
 
+    progress = make_progress(args.target)
     report: DiscoveryReport = discover(
-        target=args.target, ssh=args.ssh, timeout=args.timeout
+        target=args.target,
+        ssh=args.ssh,
+        timeout=args.timeout,
+        progress=progress,
     )
 
-    _print_discovery(report)
+    # Live chart already left the final summary on screen when TTY; otherwise
+    # print the static discovery block that scripts/CI rely on.
+    if not getattr(progress, "enabled", False):
+        _print_discovery(report)
+    else:
+        for w in report.warnings:
+            print(f"  ! {w}")
+        print()
 
     if report.errors and not args.prometheus_url:
         for err in report.errors:

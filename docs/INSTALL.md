@@ -63,8 +63,9 @@ diag install --output ./deploy
 
 ### What you will see
 
-1. **Discovery summary** — each supported tool marked `OK` or missing, with the
-   URL that responded.
+1. **Discovery summary** — live status chart while probing (TTY), then the same
+   table left on screen with each tool marked `OK` / `-`. Non-TTY callers get
+   the static summary after discovery finishes.
 2. **Confirm every parameter**, grouped into six numbered sections — discovery /
    flags / env only supply defaults:
 
