@@ -25,15 +25,21 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 | **Non-interactive** | CI/CD, automation, remote unattended hosts | `diag install --output ./deploy --non-interactive --yes` plus flags/env for anything discovery cannot fill |
 | **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to either mode |
 
-### Resolution order (both modes)
+### Resolution order
 
-Every value is resolved in this order (first non-empty wins):
+Candidates are resolved in this order (first non-empty wins as the **default**):
 
 1. **CLI flag** (e.g. `--prometheus-url`)
 2. **Environment variable** (e.g. `AGENT_PROMETHEUS_URL`)
 3. **Discovery** (Docker introspection + HTTP probes + port scan)
-4. **Interactive prompt** (interactive mode only; detected value pre-filled as default)
-5. **Safe default** or **graceful degradation** (feature disabled with a warning)
+
+Then:
+
+4. **Interactive mode (default):** **confirm every parameter** — each value is
+   shown with the candidate as the default; Enter accepts, or type a replacement.
+   Leaving a required field blank fails closed (unless `--allow-degraded`).
+5. **Non-interactive mode:** accept candidates as-is; missing required values
+   fail closed (or degrade only with `--allow-degraded`).
 
 Secrets (API keys, Grafana token, SMTP password) are prompted with hidden input
 in interactive mode and are **never** written to `install-report.json` (redacted
@@ -53,18 +59,10 @@ diag install --output ./deploy
 
 1. **Discovery summary** — each supported tool marked `OK` or missing, with the
    URL that responded.
-2. **Prompts only when needed** — if discovery (or env) already filled a value,
-   you are not asked again. Required parameters that discovery missed are
-   **always prompted** in interactive mode (fail closed if you leave them
-   blank). Typical prompts:
-   - Prometheus / Loki / Alertmanager URLs (when not discovered)
-   - Alertmanager → agent webhook URL (when empty after AM is known)
-   - Grafana URL (optional — Enter skips annotations)
-   - LLM provider (when no Ollama / AWS / OpenAI / Anthropic / Google credentials
-     were detected)
-   - Provider-specific secrets (`OPENAI_API_KEY`, AWS region, Ollama base URL, …)
-   - Enable diagnostic email? → SMTP host / port / from / to / auth
-   - Grafana service-account token (Enter skips; annotations stay off until later)
+2. **Confirm every parameter** — discovery / flags / env only supply defaults.
+   Interactive mode walks every setting (preset, Prometheus, Loki, Alertmanager,
+   webhook, Grafana, LLM, email, Grafana token). Enter keeps the default;
+   required blanks fail closed unless `--allow-degraded`.
 3. **Generation** — files written under `--output`.
 4. **Verify** — workspace + redaction + alert-rule sanity checks.
 5. **Next step** — open `APPLY.md` for how to merge rules into Prometheus /
@@ -86,23 +84,32 @@ Discovery
   [ - ] mailpit        (not found)
   [OK ] ollama         http://127.0.0.1:11434
 
-Enable diagnostic email delivery? [y/N]: n
-Grafana service-account token (Enter to skip / provision later):
+Metrics/logs preset [generic-prometheus/spring-micrometer] [generic-prometheus]:
+Prometheus URL [http://127.0.0.1:9090]:
+Loki URL [http://127.0.0.1:3100]:
+Alertmanager URL [http://127.0.0.1:9093]:
+Alertmanager -> agent webhook URL [http://host.docker.internal:8001/webhook]:
+Grafana URL (Enter to skip annotations) [http://127.0.0.1:3000]:
+LLM provider [ollama/openai/bedrock/anthropic/google] [ollama]:
+Chat model [mistral:7b-instruct]:
+Embed model [nomic-embed-text]:
+Ollama base URL [http://127.0.0.1:11434]:
+Enable diagnostic email delivery? [y/N] [n]: n
+Grafana service-account token (Enter to keep existing / skip):
 
 Wrote 21 file(s)
-  - docker introspection: 12 running container(s) (local)
+  - interactive confirm: every parameter
   - auto-preset -> generic-prometheus
-  - LLM auto -> ollama at http://127.0.0.1:11434
-  - SMTP disabled (non-interactive, no Mailpit)
-  - No Grafana token -- annotations disabled until provisioned
+  - LLM seed -> ollama at http://127.0.0.1:11434
+  - LLM confirmed -> ollama/mistral:7b-instruct
   - placement=standalone_local webhook=http://host.docker.internal:8001/webhook
 
 verify OK
 Next: read deploy/APPLY.md
 ```
 
-In this run LLM and endpoints came from discovery; only email and the Grafana
-token were optional prompts.
+In this run discovery filled the defaults; interactive mode still confirmed each
+parameter (Enter accepted the discovered values).
 
 ### Interactive + remote discovery
 

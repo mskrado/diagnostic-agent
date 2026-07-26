@@ -138,10 +138,16 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch):
     report.reachability = ReachabilityMatrix()
     answers = iter(
         [
+            "generic-prometheus",  # preset
             "http://prom:9090",
             "http://loki:3100",
             "http://am:9093",
+            "http://agent:8000/webhook",
             "",  # skip Grafana
+            "ollama",  # LLM provider
+            "",  # chat model default
+            "",  # embed model default
+            "http://127.0.0.1:11434",  # ollama base
             "n",  # no email
         ]
     )
@@ -156,16 +162,52 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch):
         report,
         non_interactive=False,
         preset="generic-prometheus",
-        overrides={"chat_provider": "ollama"},
     )
     assert params.prometheus_url == "http://prom:9090"
     assert params.loki_url == "http://loki:3100"
     assert params.alertmanager_url == "http://am:9093"
+    assert params.webhook_url == "http://agent:8000/webhook"
+    assert params.chat_provider == "ollama"
     assert params.webhook_disabled is False
     assert params.metrics_only is False
-    assert any("Prometheus URL from prompt" in d for d in report.decisions)
-    assert any("Loki URL from prompt" in d for d in report.decisions)
-    assert any("Alertmanager URL from prompt" in d for d in report.decisions)
+    assert any("interactive confirm: every parameter" in d for d in report.decisions)
+    assert any("Prometheus URL confirmed" in d for d in report.decisions)
+    assert any("Loki URL confirmed" in d for d in report.decisions)
+    assert any("Alertmanager URL confirmed" in d for d in report.decisions)
+
+
+def test_collect_confirms_discovered_defaults(monkeypatch):
+    """Interactive install confirms every param even when discovery filled them."""
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix(
+        agent_to_prometheus="http://127.0.0.1:9090",
+        agent_to_loki="http://127.0.0.1:3100",
+        agent_to_alertmanager="http://127.0.0.1:9093",
+        agent_to_grafana="http://127.0.0.1:3000",
+        alertmanager_to_agent_webhook="http://host.docker.internal:8001/webhook",
+    )
+    report.tools = [
+        ToolEndpoint(
+            kind=ToolKind.OLLAMA,
+            reachable=True,
+            url="http://127.0.0.1:11434",
+        ),
+    ]
+    # Enter on every prompt -> keep discovered defaults.
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: "")
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+
+    params = collect(report, non_interactive=False, preset="auto")
+    assert params.prometheus_url == "http://127.0.0.1:9090"
+    assert params.loki_url == "http://127.0.0.1:3100"
+    assert params.alertmanager_url == "http://127.0.0.1:9093"
+    assert params.grafana_url == "http://127.0.0.1:3000"
+    assert params.webhook_url == "http://host.docker.internal:8001/webhook"
+    assert params.chat_provider == "ollama"
+    assert any("interactive confirm: every parameter" in d for d in report.decisions)
+    assert any("LLM confirmed" in d for d in report.decisions)
 
 
 def test_collect_degrades_with_allow_degraded(monkeypatch):
