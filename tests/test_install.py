@@ -116,14 +116,37 @@ def test_collect_requires_prometheus():
         collect(report, non_interactive=True)
 
 
-def test_collect_degrades_without_loki_grafana(monkeypatch):
+def test_collect_fail_closed_without_loki_or_alertmanager(monkeypatch):
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix(
         agent_to_prometheus="http://127.0.0.1:9090",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
-    params = collect(report, non_interactive=True, preset="generic-prometheus")
+    with pytest.raises(ValueError, match="fail closed"):
+        collect(
+            report,
+            non_interactive=True,
+            preset="generic-prometheus",
+            overrides={"chat_provider": "ollama"},
+        )
+
+
+def test_collect_degrades_with_allow_degraded(monkeypatch):
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix(
+        agent_to_prometheus="http://127.0.0.1:9090",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    params = collect(
+        report,
+        non_interactive=True,
+        allow_degraded=True,
+        preset="generic-prometheus",
+    )
     assert params.prometheus_url == "http://127.0.0.1:9090"
     assert params.metrics_only is True
     assert params.annotations_disabled is True
@@ -131,12 +154,29 @@ def test_collect_degrades_without_loki_grafana(monkeypatch):
     assert params.preset == "generic-prometheus"
 
 
-def test_generate_and_verify(tmp_path: Path):
+def test_collect_fail_closed_without_llm(monkeypatch):
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix(
+        agent_to_prometheus="http://127.0.0.1:9090",
+        agent_to_loki="http://127.0.0.1:3100",
+        agent_to_alertmanager="http://127.0.0.1:9093",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("DIAGNOSTIC_AGENT_AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="No LLM credentials"):
+        collect(report, non_interactive=True, preset="generic-prometheus")
+
+
+def _complete_report() -> DiscoveryReport:
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix(
         agent_placement="standalone_local",
         agent_to_prometheus="http://127.0.0.1:9090",
         agent_to_loki="http://127.0.0.1:3100",
+        agent_to_alertmanager="http://127.0.0.1:9093",
         alertmanager_to_agent_webhook="http://host.docker.internal:8001/webhook",
     )
     report.tools = [
@@ -150,7 +190,17 @@ def test_generate_and_verify(tmp_path: Path):
             reachable=True,
             url="http://127.0.0.1:3100",
         ),
+        ToolEndpoint(
+            kind=ToolKind.ALERTMANAGER,
+            reachable=True,
+            url="http://127.0.0.1:9093",
+        ),
     ]
+    return report
+
+
+def test_generate_and_verify(tmp_path: Path):
+    report = _complete_report()
     params = collect(
         report,
         non_interactive=True,
@@ -171,6 +221,7 @@ def test_generate_and_verify(tmp_path: Path):
     assert (out / "agent" / ".env").is_file()
     assert (out / "agent" / "workspace" / "agent.yaml").is_file()
     assert (out / "agent" / "workspace" / "redaction.yaml").is_file()
+    assert (out / "observability" / "alertmanager" / "route.generated.yml").is_file()
     rules = yaml.safe_load(
         (out / "observability" / "prometheus" / "alert-rules.generated.yml").read_text(
             encoding="utf-8"
@@ -179,6 +230,7 @@ def test_generate_and_verify(tmp_path: Path):
     assert rules["groups"][0]["rules"]
     env = (out / "agent" / ".env").read_text(encoding="utf-8")
     assert "AGENT_PROMETHEUS_URL=http://127.0.0.1:9090" in env
+    assert "AGENT_LOKI_URL=http://127.0.0.1:3100" in env
     assert "AGENT_REQUIRE_REDACTION=true" in env
 
     report_json = json.loads((out / "install-report.json").read_text(encoding="utf-8"))
@@ -190,6 +242,26 @@ def test_generate_and_verify(tmp_path: Path):
     assert errors == [], errors
 
 
+def test_verify_rejects_incomplete_bundle_without_allow_degraded(tmp_path: Path):
+    report = DiscoveryReport(target="local")
+    report.reachability = ReachabilityMatrix(
+        agent_to_prometheus="http://127.0.0.1:9090",
+    )
+    params = collect(
+        report,
+        non_interactive=True,
+        allow_degraded=True,
+        overrides={"chat_provider": "ollama", "prometheus_url": "http://127.0.0.1:9090"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    errors = verify(out, allow_degraded=False)
+    assert any("AGENT_LOKI_URL" in e for e in errors)
+    assert any("route.generated.yml" in e for e in errors)
+    assert verify(out, allow_degraded=True) == []
+
+
 def test_generate_dry_run_writes_nothing(tmp_path: Path):
     report = DiscoveryReport(target="local")
     report.reachability = ReachabilityMatrix(
@@ -198,6 +270,7 @@ def test_generate_dry_run_writes_nothing(tmp_path: Path):
     params = collect(
         report,
         non_interactive=True,
+        allow_degraded=True,
         overrides={"chat_provider": "ollama", "prometheus_url": "http://127.0.0.1:9090"},
     )
     package_root = Path(__file__).resolve().parent.parent
@@ -219,6 +292,7 @@ def test_generate_idempotent_backup(tmp_path: Path):
     params = collect(
         report,
         non_interactive=True,
+        allow_degraded=True,
         overrides={"chat_provider": "ollama", "prometheus_url": "http://127.0.0.1:9090"},
     )
     package_root = Path(__file__).resolve().parent.parent

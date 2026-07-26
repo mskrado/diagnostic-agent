@@ -83,6 +83,14 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
         help="Never prompt; require flags/env for missing secrets",
     )
     p.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit soft-degrade (metrics-only without Loki, no Alertmanager "
+            "webhook route, blind Ollama LLM fallback). Default is fail closed."
+        ),
+    )
+    p.add_argument(
         "--yes",
         "-y",
         action="store_true",
@@ -139,6 +147,7 @@ def run_install(args: argparse.Namespace) -> int:
             report,
             preset=args.preset,
             non_interactive=args.non_interactive,
+            allow_degraded=args.allow_degraded,
             overrides=overrides,
         )
     except ValueError as exc:
@@ -160,7 +169,7 @@ def run_install(args: argparse.Namespace) -> int:
     if args.dry_run:
         return 0
 
-    errors = verify(output)
+    errors = verify(output, allow_degraded=args.allow_degraded)
     if errors:
         print("\nverify FAILED:", file=sys.stderr)
         for e in errors:

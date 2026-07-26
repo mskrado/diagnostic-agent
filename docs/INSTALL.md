@@ -136,14 +136,17 @@ diag install \
 
 ### Behaviour when something is missing
 
-| Gap | Non-interactive behaviour |
-|---|---|
-| No Prometheus URL (flag/env/discovery) | **Exit 1** — hard failure |
-| No Loki | Continue; metrics-only diagnosis |
-| No Grafana / no token | Continue; annotations disabled |
-| No Alertmanager | Continue; no webhook route generated |
-| No LLM credentials / Ollama | Default to **ollama** + warning (ensure Ollama is up before `--start`) |
-| No Mailpit / SMTP | Email delivery **disabled** |
+Default is **fail closed** (matches the install contract: every parameter needed
+to run + complete observability wiring). Soft-degrade requires `--allow-degraded`.
+
+| Gap | Default behaviour | With `--allow-degraded` |
+|---|---|---|
+| No Prometheus URL (flag/env/discovery) | **Exit 1** | **Exit 1** |
+| No Loki | **Exit 1** | Continue; metrics-only diagnosis |
+| No Alertmanager | **Exit 1** | Continue; no webhook route generated |
+| No LLM credentials / reachable Ollama | **Exit 1** (non-interactive) | Default to **ollama** + warning |
+| No Grafana / no token | Continue; annotations disabled | Same (optional delivery) |
+| No Mailpit / SMTP | Email delivery **disabled** | Same (optional delivery) |
 
 ### CI-friendly pattern
 
@@ -185,6 +188,7 @@ reloading a live Prometheus/Alertmanager.
 | `--dry-run` | No | off | Print plan; write nothing |
 | `--force` | No | off | Allow replacing differing files (always keeps `*.bak.<utc>` backups) |
 | `--non-interactive` | No | off | Never prompt |
+| `--allow-degraded` | No | off | Permit metrics-only / no AM webhook / blind Ollama fallback; default is fail closed |
 | `--yes` / `-y` | No | off | Confirm `--apply` without asking |
 | `--apply` | No | off | Best-effort `POST /-/reload` on Prometheus & Alertmanager |
 | `--start` | No | off | `docker compose up -d` in `agent/` + `/health` probe |
@@ -207,9 +211,9 @@ browser.
 | Parameter | Env var | Required? | Why it is needed |
 |---|---|---|---|
 | Prometheus URL | `AGENT_PROMETHEUS_URL` | **Required** | Metrics are the primary signal for every diagnosis. Install **fails** without a reachable Prometheus (or an explicit override). |
-| Loki URL | `AGENT_LOKI_URL` | Recommended | Log evidence for runbook correlation. If missing → **metrics-only** mode. |
+| Loki URL | `AGENT_LOKI_URL` | **Required** (unless `--allow-degraded`) | Log evidence for runbook correlation. Missing without `--allow-degraded` → **exit 1**; with the flag → metrics-only. |
 | Grafana URL | `AGENT_GRAFANA_URL` | Optional | Base URL for annotation delivery. If missing → annotations off. |
-| Alertmanager URL | *(report / apply only)* | Optional | Used for discovery + `--apply` reload. If missing → no webhook route file; agent still accepts manual `POST /alert`. |
+| Alertmanager URL | *(report / apply + webhook wiring)* | **Required** (unless `--allow-degraded`) | Required for the reactive Alertmanager → agent path. Missing without `--allow-degraded` → **exit 1**. |
 
 **Typical values**
 
@@ -223,7 +227,7 @@ browser.
 
 | Parameter | Flag / field | Required? | Why |
 |---|---|---|---|
-| Webhook URL | `--webhook-url` | Required **if** Alertmanager is present | Alertmanager must POST firing alerts to the agent. Wrong address = silent “agent never runs”. |
+| Webhook URL | `--webhook-url` | **Required** when Alertmanager is present (default path) | Alertmanager must POST firing alerts to the agent. Wrong address = silent “agent never runs”. |
 
 How the installer picks a default:
 
@@ -384,14 +388,19 @@ Re-running `diag install --output ./deploy` is safe:
 
 ## Graceful degradation
 
-| Missing tool | Behaviour |
-|---|---|
-| **Prometheus** | **Hard fail** — install aborts |
-| Loki / Promtail | Metrics-only diagnosis; warning in report |
-| Alertmanager | No `route.generated.yml` webhook; manual `POST /alert` still works |
-| Grafana | Annotations disabled; audit JSON / email still available |
-| Mailpit / SMTP | Email disabled |
-| Docker CLI | HTTP/port discovery only (no container DNS names) |
+Soft-degrade is **opt-in** via `--allow-degraded`. Without that flag, missing
+Loki, Alertmanager, or LLM config fails the install instead of writing a
+partial bundle.
+
+| Missing tool | Default | With `--allow-degraded` |
+|---|---|---|
+| **Prometheus** | **Hard fail** — install aborts | **Hard fail** |
+| Loki / Promtail | **Hard fail** | Metrics-only diagnosis; warning in report |
+| Alertmanager | **Hard fail** | No `route.generated.yml` webhook; manual `POST /alert` still works |
+| Grafana | Annotations disabled; audit JSON / email still available | Same |
+| Mailpit / SMTP | Email disabled | Same |
+| LLM (non-interactive) | **Hard fail** | Blind Ollama default + warning |
+| Docker CLI | HTTP/port discovery only (no container DNS names) | Same |
 
 ---
 

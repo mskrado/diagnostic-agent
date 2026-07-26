@@ -13,12 +13,21 @@ def collect(
     *,
     preset: str = "auto",
     non_interactive: bool = False,
+    allow_degraded: bool = False,
     overrides: dict[str, Any] | None = None,
 ) -> InstallParams:
-    """Merge discovery + env/flags + prompts into :class:`InstallParams`."""
+    """Merge discovery + env/flags + prompts into :class:`InstallParams`.
+
+    Default is **fail closed**: Prometheus, Loki, Alertmanager (+ webhook), and a
+    usable LLM must be resolved before a complete install bundle is emitted.
+    Soft-degrade (metrics-only / no webhook route / blind Ollama fallback) requires
+    ``allow_degraded=True`` (``--allow-degraded``). Grafana annotations and SMTP
+    remain optional delivery channels.
+    """
     overrides = overrides or {}
     params = InstallParams()
     matrix = report.reachability
+    missing: list[str] = []
 
     # --- Endpoints from reachability matrix ---
     params.prometheus_url = _first(
@@ -52,20 +61,56 @@ def collect(
     # --- Preset ---
     params.preset = _resolve_preset(preset, report, overrides)
 
-    # --- Degradation ---
+    # --- Required data / control plane (fail closed unless --allow-degraded) ---
     if not params.loki_url:
-        params.metrics_only = True
-        report.decisions.append("Loki missing -> metrics-only diagnosis")
+        if allow_degraded:
+            params.metrics_only = True
+            report.decisions.append("Loki missing -> metrics-only diagnosis")
+        else:
+            missing.append(
+                "Loki URL (--loki-url / AGENT_LOKI_URL / discovery)"
+            )
+    if not params.alertmanager_url:
+        if allow_degraded:
+            params.webhook_disabled = True
+            report.decisions.append(
+                "Alertmanager missing -> webhook routing disabled"
+            )
+        else:
+            missing.append(
+                "Alertmanager URL (--alertmanager-url / discovery)"
+            )
+    elif not params.webhook_url:
+        missing.append("Alertmanager -> agent webhook URL (--webhook-url)")
+
+    # Grafana annotations: optional (not required to run the agent).
     if not params.grafana_url:
         params.annotations_disabled = True
         params.grafana_annotations_enabled = False
         report.decisions.append("Grafana missing -> annotations disabled")
-    if not params.alertmanager_url:
-        params.webhook_disabled = True
-        report.decisions.append("Alertmanager missing -> webhook routing disabled")
+
+    # Hard gate: Prometheus URL must exist by this point.
+    if not params.prometheus_url:
+        raise ValueError(
+            "Prometheus URL is required. Re-run after Prometheus is reachable "
+            "or pass --prometheus-url."
+        )
+
+    if missing:
+        raise ValueError(
+            "Incomplete install parameters (fail closed). Provide the missing "
+            "values or re-run with --allow-degraded:\n"
+            + "\n".join(f"  - {item}" for item in missing)
+        )
 
     # --- LLM auto-select ---
-    _resolve_llm(params, report, overrides, non_interactive=non_interactive)
+    _resolve_llm(
+        params,
+        report,
+        overrides,
+        non_interactive=non_interactive,
+        allow_degraded=allow_degraded,
+    )
 
     # --- SMTP ---
     _resolve_smtp(params, report, overrides, non_interactive=non_interactive)
@@ -88,12 +133,8 @@ def collect(
                 "No Grafana token -- annotations disabled until provisioned"
             )
 
-    # Hard gate: Prometheus URL must exist by this point.
-    if not params.prometheus_url:
-        raise ValueError(
-            "Prometheus URL is required. Re-run after Prometheus is reachable "
-            "or pass --prometheus-url."
-        )
+    if allow_degraded:
+        report.decisions.append("allow_degraded=true")
 
     report.decisions.append(f"preset={params.preset}")
     report.decisions.append(f"chat={params.chat_provider}/{params.chat_model}")
@@ -127,6 +168,7 @@ def _resolve_llm(
     overrides: dict[str, Any],
     *,
     non_interactive: bool,
+    allow_degraded: bool = False,
 ) -> None:
     if overrides.get("chat_provider"):
         params.chat_provider = str(overrides["chat_provider"])
@@ -216,9 +258,16 @@ def _resolve_llm(
         params.google_api_key = google_key
         report.decisions.append("LLM auto -> google_genai")
     elif non_interactive:
-        report.warnings.append(
-            "No LLM credentials detected -- defaulting to ollama "
-            "(ensure Ollama is running before starting the agent)"
+        if allow_degraded:
+            report.warnings.append(
+                "No LLM credentials detected -- defaulting to ollama "
+                "(ensure Ollama is running before starting the agent)"
+            )
+            return
+        raise ValueError(
+            "No LLM credentials detected (fail closed). Pass --chat-provider, "
+            "set OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY / AWS_*, "
+            "ensure Ollama is reachable, or re-run with --allow-degraded."
         )
     else:
         choice = _prompt(
