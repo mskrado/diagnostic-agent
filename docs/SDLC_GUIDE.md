@@ -207,9 +207,19 @@ When a PR **merges into `devel`**, closes issues referenced with `Closes` / `Fix
 
 ### `release.yml`
 
-**Triggers:** push of tag `v*`, or `workflow_dispatch` with a version input.
+**Triggers:** push of tag `vX.Y.Z`, or `workflow_dispatch` with a `bump` choice
+(`patch` / `minor` / `major`) — there is no free-text version input.
 
-Publishes multi-arch image to GHCR; on tag push also attempts PyPI upload.
+A tag push *is* the version. A manual run computes the next semver from the
+latest `v*` tag (`scripts/version-next.sh`), rejects anything that is not
+`MAJOR.MINOR.PATCH`, refuses to run off `main`, and creates the git tag only
+after the publish steps succeed.
+
+The resolved version is stamped into `pyproject.toml` before build (not
+committed), so the image, the wheel, `diag version`, and the audit record's
+`agent_version` cannot disagree with the tag. Publishes a multi-arch image to
+GHCR tagged `X.Y.Z`, `sha-<short>`, and `latest`, uploads the wheel to PyPI when
+`PYPI_API_TOKEN` is configured, and opens a GitHub Release with generated notes.
 
 ---
 
@@ -220,17 +230,24 @@ Publishes multi-arch image to GHCR; on tag push also attempts PyPI upload.
 3. Publish (merge does **not** publish):
 
 ```bash
-# Option A — tag (PyPI path included)
-git checkout main && git pull
-git tag v0.2.0
-git push origin v0.2.0
-
-# Option B — manual dispatch
-gh workflow run release.yml --ref main -f tag=0.2.0
+# Option A — dispatch a bump; the workflow computes and pushes the tag
+gh workflow run release.yml --ref main -f bump=patch
 gh run watch
+
+# Option B — pick the version yourself by pushing the tag
+git checkout main && git pull
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 Bump rules: **MAJOR** = breaking workspace/profile/CLI contract · **MINOR** = backward-compatible feature · **PATCH** = fix/docs/corpus.
+
+Preview what a bump would produce before dispatching:
+
+```bash
+git fetch --tags
+BUMP=minor bash scripts/version-next.sh
+```
 
 Host repos pin `agent_version` / image tag to the published semver (see `docs/INTEGRATING.md` and `docs/WORKSPACE.md`).
 

@@ -61,8 +61,8 @@ gh pr ready && gh pr checks --watch
 Production publishes go **`devel` → `main`** behind a **Release Checklist** issue — the only path into `main`. Merge updates `main` only; then run Release explicitly:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=0.2.0
-# or: git tag v0.2.0 && git push origin v0.2.0
+gh workflow run release.yml --ref main -f bump=patch   # patch|minor|major
+# or pick the version yourself: git tag v1.2.0 && git push origin v1.2.0
 ```
 
 ```bash

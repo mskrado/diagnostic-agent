@@ -7,13 +7,19 @@ from pathlib import Path
 import yaml
 
 
-def verify(output: Path) -> list[str]:
-    """Return a list of error strings (empty = OK)."""
+def verify(output: Path, *, allow_degraded: bool = False) -> list[str]:
+    """Return a list of error strings (empty = OK).
+
+    Default verifies a **complete** bundle (agent build/run + observability
+    wiring for the reactive path). Pass ``allow_degraded=True`` when the
+    bundle was generated with ``--allow-degraded``.
+    """
     errors: list[str] = []
     output = output.resolve()
     workspace = output / "agent" / "workspace"
     env_file = output / "agent" / ".env"
     rules = output / "observability" / "prometheus" / "alert-rules.generated.yml"
+    am_route = output / "observability" / "alertmanager" / "route.generated.yml"
     apply_md = output / "APPLY.md"
     report = output / "install-report.json"
 
@@ -38,6 +44,34 @@ def verify(output: Path) -> list[str]:
                 errors.append("alert-rules.generated.yml has no rules")
         except yaml.YAMLError as exc:
             errors.append(f"alert-rules YAML error: {exc}")
+
+    env_map = _parse_env(env_file) if env_file.is_file() else {}
+    if not env_map.get("AGENT_PROMETHEUS_URL"):
+        errors.append("agent/.env missing AGENT_PROMETHEUS_URL")
+
+    if allow_degraded:
+        # Degraded bundles may omit Loki and/or Alertmanager webhook wiring.
+        pass
+    else:
+        if not env_map.get("AGENT_LOKI_URL"):
+            errors.append(
+                "agent/.env missing AGENT_LOKI_URL "
+                "(complete install requires Loki; use --allow-degraded otherwise)"
+            )
+        if not am_route.is_file():
+            errors.append(
+                "missing observability/alertmanager/route.generated.yml "
+                "(complete install requires Alertmanager webhook wiring; "
+                "use --allow-degraded otherwise)"
+            )
+        elif am_route.is_file():
+            try:
+                doc = yaml.safe_load(am_route.read_text(encoding="utf-8")) or {}
+                receivers = doc.get("receivers") or []
+                if not receivers:
+                    errors.append("alertmanager route.generated.yml has no receivers")
+            except yaml.YAMLError as exc:
+                errors.append(f"alertmanager route YAML error: {exc}")
 
     # Prefer in-process validate when the package is importable.
     if workspace.is_dir() and (workspace / "agent.yaml").is_file():
@@ -66,6 +100,18 @@ def verify(output: Path) -> list[str]:
             errors.append(f"promtool: {proc.stderr.strip() or proc.stdout.strip()}")
 
     return errors
+
+
+def _parse_env(path: Path) -> dict[str, str]:
+    """Minimal KEY=VALUE parser for generated agent/.env files."""
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
 
 
 def shutil_which(cmd: str) -> str | None:

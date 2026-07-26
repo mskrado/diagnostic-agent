@@ -21,19 +21,31 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 
 | Mode | When to use | How |
 |---|---|---|
-| **Interactive** (default) | First-time install on a laptop or bastion; you want guided prompts with sensible defaults | `diag install --output ./deploy` |
+| **Interactive** (default) | First-time install; **confirm every parameter** after discovery (Enter keeps defaults) | `diag install --output ./deploy` |
+| **Accept defaults** | Re-run against a stack you already trust; resolves interactively but never prompts | `diag install --output ./deploy --accept-defaults` |
 | **Non-interactive** | CI/CD, automation, remote unattended hosts | `diag install --output ./deploy --non-interactive --yes` plus flags/env for anything discovery cannot fill |
-| **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to either mode |
+| **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to any mode |
 
-### Resolution order (both modes)
+If stdin is not a terminal (piped input, CI shell), interactive mode switches
+itself to non-interactive and says so, rather than silently accepting defaults.
+`Ctrl-C` at any prompt exits cleanly with code `130` and writes nothing.
 
-Every value is resolved in this order (first non-empty wins):
+### Resolution order
+
+Candidates are resolved in this order (first non-empty wins as the **default**):
 
 1. **CLI flag** (e.g. `--prometheus-url`)
 2. **Environment variable** (e.g. `AGENT_PROMETHEUS_URL`)
 3. **Discovery** (Docker introspection + HTTP probes + port scan)
-4. **Interactive prompt** (interactive mode only; detected value pre-filled as default)
-5. **Safe default** or **graceful degradation** (feature disabled with a warning)
+
+Then:
+
+4. **Interactive mode (default):** **confirm every parameter** — each value is
+   shown with the candidate as the default; Enter accepts, or type a replacement.
+   Input is validated (URL shape, port range, allowed choices) and re-asked on
+   error. Leaving a required field blank fails closed (unless `--allow-degraded`).
+5. **Non-interactive mode:** accept candidates as-is; missing required values
+   fail closed (or degrade only with `--allow-degraded`).
 
 Secrets (API keys, Grafana token, SMTP password) are prompted with hidden input
 in interactive mode and are **never** written to `install-report.json` (redacted
@@ -51,19 +63,44 @@ diag install --output ./deploy
 
 ### What you will see
 
-1. **Discovery summary** — each supported tool marked `OK` or missing, with the
-   URL that responded.
-2. **Prompts only when needed** — if discovery (or env) already filled a value,
-   you are not asked again. Typical prompts:
-   - LLM provider (when no Ollama / AWS / OpenAI / Anthropic / Google credentials
-     were detected)
-   - Provider-specific secrets (`OPENAI_API_KEY`, AWS region, Ollama base URL, …)
-   - Enable diagnostic email? → SMTP host / port / from / to / auth
-   - Grafana service-account token (Enter skips; annotations stay off until later)
-3. **Generation** — files written under `--output`.
-4. **Verify** — workspace + redaction + alert-rule sanity checks.
-5. **Next step** — open `APPLY.md` for how to merge rules into Prometheus /
-   Alertmanager and start the agent.
+1. **Discovery summary** — live status chart while probing (TTY), then the same
+   table left on screen with each tool marked `OK` / `-`. Non-TTY callers get
+   the static summary after discovery finishes.
+2. **Confirm every parameter**, grouped into six numbered sections — discovery /
+   flags / env only supply defaults:
+
+   | Section | Covers |
+   |---|---|
+   | 1. Workspace preset | `generic-prometheus` vs `spring-micrometer` |
+   | 2. Observability endpoints | Prometheus, Loki |
+   | 3. Alert routing | Alertmanager + agent webhook URL |
+   | 4. Grafana annotations | Grafana URL (optional) |
+   | 5. Diagnosis LLM | provider, models, **credentials** |
+   | 6. Diagnostic email | SMTP host/port/addresses, then the Grafana token |
+
+3. **Container-reachability rewrite** — the installer probes from *your* host, so
+   a discovered `http://127.0.0.1:9090` would point at the agent container once
+   it runs. Interactive mode offers `http://host.docker.internal:9090` instead
+   (default yes) and the generated compose adds the matching
+   `host.docker.internal:host-gateway` mapping so it also works on Linux.
+4. **Reachability warning** — a URL you *change* is health-checked; a failure
+   warns and is recorded in `install-report.json` rather than blocking you.
+5. **Review summary** — every resolved value is printed before anything is
+   written. Answer `n` to walk the prompts again; `--yes` skips this step.
+6. **Verify**, then **next steps** with copy-pasteable commands.
+
+### Provider credentials are collected, not assumed
+
+Picking a provider interactively also collects what it needs to run:
+
+| Provider | Collected |
+|---|---|
+| `ollama` | base URL (with container rewrite) |
+| `openai` / `anthropic` / `google` | API key (hidden input; required unless `--allow-degraded`) |
+| `bedrock` | region + either explicit `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an explicit "use ambient credentials" answer that is recorded as a warning |
+
+This closes the case where choosing Bedrock produced an `agent/.env` with a
+Bedrock provider and no credentials.
 
 ### Interactive example
 
@@ -72,32 +109,56 @@ $ diag install --output ./deploy
 
 diag install - target=local output=./deploy
 
-Discovery
----------
-  [OK ] prometheus     http://127.0.0.1:9090
-  [OK ] loki           http://127.0.0.1:3100
+Discovery (6/9 reachable on local)
+----------------------------------
   [OK ] alertmanager   http://127.0.0.1:9093
-  [OK ] grafana        http://127.0.0.1:3000
-  [ - ] mailpit        (not found)
+  [OK ] grafana        http://127.0.0.1:3000  v11.0.0
+  [OK ] loki           http://127.0.0.1:3100
   [OK ] ollama         http://127.0.0.1:11434
+  [OK ] prometheus     http://127.0.0.1:9090
+  [ - ] mailpit        (not found)
+  placement: standalone_local
 
-Enable diagnostic email delivery? [y/N]: n
-Grafana service-account token (Enter to skip / provision later):
+[1/6] Workspace preset
+-----------------------
+  Selects PromQL templates and log label conventions.
+Metrics/logs preset [generic-prometheus/spring-micrometer] [generic-prometheus]:
+
+[2/6] Observability endpoints (agent reads these)
+--------------------------------------------------
+  Required: metrics are the primary diagnosis signal.
+Prometheus URL [http://127.0.0.1:9090]:
+  Loopback addresses point at the agent container, not your host.
+The agent runs in a container; use http://host.docker.internal:9090 instead? [Y/n]:
+...
+
+Review
+------
+  preset         generic-prometheus
+  prometheus     http://host.docker.internal:9090
+  loki           http://host.docker.internal:3100
+  alertmanager   http://host.docker.internal:9093
+  webhook        http://host.docker.internal:8001/webhook
+  grafana        http://host.docker.internal:3000
+  grafana token  (none)
+  chat           ollama/mistral:7b-instruct
+  embeddings     ollama/nomic-embed-text
+  email          (disabled)
+Write the install bundle with these settings? [Y/n]:
 
 Wrote 21 file(s)
-  - docker introspection: 12 running container(s) (local)
-  - auto-preset -> generic-prometheus
-  - LLM auto -> ollama at http://127.0.0.1:11434
-  - SMTP disabled (non-interactive, no Mailpit)
-  - No Grafana token -- annotations disabled until provisioned
-  - placement=standalone_local webhook=http://host.docker.internal:8001/webhook
+  ...
 
 verify OK
-Next: read deploy/APPLY.md
-```
 
-In this run LLM and endpoints came from discovery; only email and the Grafana
-token were optional prompts.
+Next steps
+----------
+  1. Review   deploy/install-report.json
+  2. Edit     deploy/agent/workspace/service_map.yaml
+  3. Start    cd deploy/agent && docker compose --env-file .env up -d
+  4. Health   curl -sf http://127.0.0.1:8001/health
+  5. Wire     merge deploy/observability into your live stack
+```
 
 ### Interactive + remote discovery
 
@@ -136,14 +197,17 @@ diag install \
 
 ### Behaviour when something is missing
 
-| Gap | Non-interactive behaviour |
-|---|---|
-| No Prometheus URL (flag/env/discovery) | **Exit 1** — hard failure |
-| No Loki | Continue; metrics-only diagnosis |
-| No Grafana / no token | Continue; annotations disabled |
-| No Alertmanager | Continue; no webhook route generated |
-| No LLM credentials / Ollama | Default to **ollama** + warning (ensure Ollama is up before `--start`) |
-| No Mailpit / SMTP | Email delivery **disabled** |
+Default is **fail closed** (matches the install contract: every parameter needed
+to run + complete observability wiring). Soft-degrade requires `--allow-degraded`.
+
+| Gap | Default behaviour | With `--allow-degraded` |
+|---|---|---|
+| No Prometheus URL (flag/env/discovery) | **Exit 1** | **Exit 1** |
+| No Loki | **Exit 1** | Continue; metrics-only diagnosis |
+| No Alertmanager | **Exit 1** | Continue; no webhook route generated |
+| No LLM credentials / reachable Ollama | **Exit 1** (non-interactive) | Default to **ollama** + warning |
+| No Grafana / no token | Continue; annotations disabled | Same (optional delivery) |
+| No Mailpit / SMTP | Email delivery **disabled** | Same (optional delivery) |
 
 ### CI-friendly pattern
 
@@ -185,7 +249,9 @@ reloading a live Prometheus/Alertmanager.
 | `--dry-run` | No | off | Print plan; write nothing |
 | `--force` | No | off | Allow replacing differing files (always keeps `*.bak.<utc>` backups) |
 | `--non-interactive` | No | off | Never prompt |
-| `--yes` / `-y` | No | off | Confirm `--apply` without asking |
+| `--accept-defaults` | No | off | Resolve interactively but accept every default without prompting |
+| `--allow-degraded` | No | off | Permit metrics-only / no AM webhook / blind Ollama fallback; default is fail closed |
+| `--yes` / `-y` | No | off | Skip the review confirmation and the `--apply` prompt |
 | `--apply` | No | off | Best-effort `POST /-/reload` on Prometheus & Alertmanager |
 | `--start` | No | off | `docker compose up -d` in `agent/` + `/health` probe |
 
@@ -207,9 +273,9 @@ browser.
 | Parameter | Env var | Required? | Why it is needed |
 |---|---|---|---|
 | Prometheus URL | `AGENT_PROMETHEUS_URL` | **Required** | Metrics are the primary signal for every diagnosis. Install **fails** without a reachable Prometheus (or an explicit override). |
-| Loki URL | `AGENT_LOKI_URL` | Recommended | Log evidence for runbook correlation. If missing → **metrics-only** mode. |
+| Loki URL | `AGENT_LOKI_URL` | **Required** (unless `--allow-degraded`) | Log evidence for runbook correlation. Missing without `--allow-degraded` → **exit 1**; with the flag → metrics-only. |
 | Grafana URL | `AGENT_GRAFANA_URL` | Optional | Base URL for annotation delivery. If missing → annotations off. |
-| Alertmanager URL | *(report / apply only)* | Optional | Used for discovery + `--apply` reload. If missing → no webhook route file; agent still accepts manual `POST /alert`. |
+| Alertmanager URL | *(report / apply + webhook wiring)* | **Required** (unless `--allow-degraded`) | Required for the reactive Alertmanager → agent path. Missing without `--allow-degraded` → **exit 1**. |
 
 **Typical values**
 
@@ -223,7 +289,7 @@ browser.
 
 | Parameter | Flag / field | Required? | Why |
 |---|---|---|---|
-| Webhook URL | `--webhook-url` | Required **if** Alertmanager is present | Alertmanager must POST firing alerts to the agent. Wrong address = silent “agent never runs”. |
+| Webhook URL | `--webhook-url` | **Required** when Alertmanager is present (default path) | Alertmanager must POST firing alerts to the agent. Wrong address = silent “agent never runs”. |
 
 How the installer picks a default:
 
@@ -384,14 +450,19 @@ Re-running `diag install --output ./deploy` is safe:
 
 ## Graceful degradation
 
-| Missing tool | Behaviour |
-|---|---|
-| **Prometheus** | **Hard fail** — install aborts |
-| Loki / Promtail | Metrics-only diagnosis; warning in report |
-| Alertmanager | No `route.generated.yml` webhook; manual `POST /alert` still works |
-| Grafana | Annotations disabled; audit JSON / email still available |
-| Mailpit / SMTP | Email disabled |
-| Docker CLI | HTTP/port discovery only (no container DNS names) |
+Soft-degrade is **opt-in** via `--allow-degraded`. Without that flag, missing
+Loki, Alertmanager, or LLM config fails the install instead of writing a
+partial bundle.
+
+| Missing tool | Default | With `--allow-degraded` |
+|---|---|---|
+| **Prometheus** | **Hard fail** — install aborts | **Hard fail** |
+| Loki / Promtail | **Hard fail** | Metrics-only diagnosis; warning in report |
+| Alertmanager | **Hard fail** | No `route.generated.yml` webhook; manual `POST /alert` still works |
+| Grafana | Annotations disabled; audit JSON / email still available | Same |
+| Mailpit / SMTP | Email disabled | Same |
+| LLM (non-interactive) | **Hard fail** | Blind Ollama default + warning |
+| Docker CLI | HTTP/port discovery only (no container DNS names) | Same |
 
 ---
 
