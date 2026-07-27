@@ -36,8 +36,9 @@ infrastructure/diagnostic-agent/
 ```
 
 Larger hosts move the five profile YAMLs into a `profile/` subdirectory. Both
-layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the manifest
-reference and precedence rules.
+layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the
+**file-by-file** reference (purpose, how the agent uses each file, and how to
+configure it). The subsections below are a short integrating cheat-sheet.
 
 ```yaml
 # agent.yaml
