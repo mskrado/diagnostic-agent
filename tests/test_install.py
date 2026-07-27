@@ -31,6 +31,7 @@ def test_match_image_hints():
     assert _match_image("grafana/loki:3.0.0") == ToolKind.LOKI
     assert _match_image("grafana/grafana:11.0.0") == ToolKind.GRAFANA
     assert _match_image("prom/alertmanager:v0.27.0") == ToolKind.ALERTMANAGER
+    assert _match_image("axllent/mailpit:latest") == ToolKind.MAILPIT
     assert _match_image("nginx:latest") is None
 
 
@@ -39,6 +40,12 @@ def test_parse_published_port_prefers_container_port():
     assert _parse_published_port(ports, 9090) == 9090
     assert _parse_published_port("127.0.0.1:3000->3000/tcp", 3000) == 3000
     assert _parse_published_port("", 9090) is None
+
+
+def test_parse_published_port_prefers_mailpit_http_ui():
+    ports = "0.0.0.0:1025->1025/tcp, 0.0.0.0:8025->8025/tcp"
+    assert _parse_published_port(ports, 8025) == 8025
+    assert _parse_published_port(ports, 1025) == 1025
 
 
 def test_tools_from_containers_dedupes():
@@ -574,3 +581,73 @@ def test_discover_handles_docker_unavailable(mock_run: MagicMock):
         report = discover(target="local", timeout=0.1)
         assert report.errors  # prometheus missing
         assert any("docker introspection unavailable" in w for w in report.warnings)
+
+
+def test_collect_seeds_mailpit_smtp_from_container(no_llm_env, no_probe):
+    """Docker-found Mailpit (even without HTTP reachability) seeds SMTP."""
+    report = _discovered_report()
+    report.tools.append(
+        ToolEndpoint(
+            kind=ToolKind.MAILPIT,
+            reachable=False,
+            container_name="publishi-mailpit",
+            published_port=8025,
+        )
+    )
+    params = collect(
+        report,
+        non_interactive=True,
+        allow_degraded=True,
+        overrides={"chat_provider": "ollama"},
+    )
+    assert params.email_enabled is True
+    assert params.smtp_host == "publishi-mailpit"
+    assert params.smtp_port == 1025
+    assert params.smtp_starttls is False
+    assert params.smtp_username == ""
+    assert any("SMTP seed -> Mailpit" in d for d in report.decisions)
+
+
+def test_collect_interactive_smtp_defaults_to_mailpit_client(
+    monkeypatch, no_llm_env, no_probe
+):
+    """Without Mailpit, enabling email still defaults to Mailpit client settings."""
+    report = _discovered_report()
+    answers = iter(
+        [
+            "generic-prometheus",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "ollama",
+            "",
+            "",
+            "",
+            "y",  # enable email
+            "",  # smtp host -> host.docker.internal
+            "",  # smtp port -> 1025
+            "",  # from
+            "",  # to
+            "",  # username
+            "n",  # starttls
+            "y",  # accept review
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(answers))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
+
+    params = collect(report, non_interactive=False, preset="generic-prometheus")
+    assert params.email_enabled is True
+    assert params.smtp_host == "host.docker.internal"
+    assert params.smtp_port == 1025
+    assert params.smtp_starttls is False
+
+
+def test_mailpit_default_ports_and_health():
+    from app.install.models import DEFAULT_PORTS, HEALTH_PATHS, MAILPIT_SMTP_PORT
+
+    assert DEFAULT_PORTS[ToolKind.MAILPIT] == 8025
+    assert MAILPIT_SMTP_PORT == 1025
+    assert "/api/v1/info" in HEALTH_PATHS[ToolKind.MAILPIT]
