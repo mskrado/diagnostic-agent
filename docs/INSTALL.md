@@ -17,6 +17,22 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 
 ---
 
+## Topics
+
+1. [Modes at a glance](#modes-at-a-glance)
+2. [Interactive mode](#interactive-mode)
+3. [Non-interactive mode](#non-interactive-mode)
+4. [CLI flags reference](#cli-flags-reference)
+5. [Parameters collected (full reference)](#parameters-collected-full-reference)
+6. [What gets generated](#what-gets-generated)
+7. [After install](#after-install)
+8. [Graceful degradation](#graceful-degradation)
+9. [Troubleshooting](#troubleshooting)
+10. [Requirements](#requirements)
+11. [Quick recipe card](#quick-recipe-card)
+
+---
+
 ## Modes at a glance
 
 | Mode | When to use | How |

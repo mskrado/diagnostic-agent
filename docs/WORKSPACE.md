@@ -28,6 +28,29 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
 ```
 
+---
+
+## Topics
+
+1. [Locating the workspace](#locating-the-workspace)
+2. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
+3. [Manifest (`agent.yaml`)](#manifest-agentyaml)
+4. [Flat layout](#flat-layout)
+5. [File-by-file reference](#file-by-file-reference)
+   - [`metrics_profile.yaml`](#metrics_profileyaml)
+   - [`logs_profile.yaml`](#logs_profileyaml)
+   - [`prompt_profile.yaml`](#prompt_profileyaml)
+   - [`redaction.yaml`](#redactionyaml)
+   - [`service_map.yaml`](#service_mapyaml)
+   - [`scenarios.yaml`](#scenariosyaml)
+   - [`blind_eval.yaml`](#blind_evalyaml-optional)
+   - [`runbooks/`](#runbooks)
+6. [Precedence](#precedence)
+7. [Redaction is fail-closed](#redaction-is-fail-closed)
+8. [Validating in CI](#validating-in-ci)
+
+---
+
 ## Locating the workspace
 
 Resolved in this order:
