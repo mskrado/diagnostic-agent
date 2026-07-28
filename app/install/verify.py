@@ -23,9 +23,21 @@ def verify(output: Path, *, allow_degraded: bool = False) -> list[str]:
     apply_md = output / "APPLY.md"
     report = output / "install-report.json"
 
-    for required in (workspace / "agent.yaml", env_file, rules, apply_md, report):
+    for required in (
+        workspace / "agent.yaml",
+        workspace / "blind_eval.yaml",
+        workspace / "scenarios.yaml",
+        env_file,
+        rules,
+        apply_md,
+        report,
+    ):
         if not required.is_file():
             errors.append(f"missing required file: {required}")
+
+    runbooks = workspace / "runbooks"
+    if not runbooks.is_dir() or not any(runbooks.glob("runbook-*.md")):
+        errors.append("workspace/runbooks has no runbook-*.md files")
 
     if (workspace / "redaction.yaml").is_file():
         raw = yaml.safe_load(
@@ -85,6 +97,8 @@ def verify(output: Path, *, allow_degraded: bool = False) -> list[str]:
                     "resolved profile has 0 redaction rules -- "
                     "reports would carry unredacted data"
                 )
+            if ws.blind_eval_path is None:
+                errors.append("workspace did not resolve blind_eval.yaml")
         except Exception as exc:  # noqa: BLE001
             errors.append(f"workspace validate: {exc}")
 
