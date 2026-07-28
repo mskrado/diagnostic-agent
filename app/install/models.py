@@ -39,8 +39,12 @@ DEFAULT_PORTS: dict[ToolKind, int] = {
     ToolKind.NODE_EXPORTER: 9100,
     ToolKind.CADVISOR: 8080,
     ToolKind.OLLAMA: 11434,
-    ToolKind.MAILPIT: 1025,
+    # Mailpit HTTP UI / API (SMTP relay stays on MAILPIT_SMTP_PORT).
+    ToolKind.MAILPIT: 8025,
 }
+
+# Mailpit SMTP listen port (separate from the HTTP UI in DEFAULT_PORTS).
+MAILPIT_SMTP_PORT = 1025
 
 # Image name substrings -> tool kind (matched case-insensitively against image).
 IMAGE_HINTS: list[tuple[str, ToolKind]] = [
@@ -69,6 +73,7 @@ HEALTH_PATHS: dict[ToolKind, list[str]] = {
     ToolKind.TEMPO: ["/ready"],
     ToolKind.PROMTAIL: ["/ready"],
     ToolKind.OLLAMA: ["/api/tags"],
+    ToolKind.MAILPIT: ["/api/v1/info"],
 }
 
 
@@ -105,7 +110,8 @@ class ReachabilityMatrix:
     agent_to_grafana: str = ""
     agent_to_alertmanager: str = ""
     # URL Alertmanager should use to push webhooks to the agent.
-    alertmanager_to_agent_webhook: str = "http://diagnostic-agent:8000/webhook"
+    # Path must be /alert — that is the only route app.main serves.
+    alertmanager_to_agent_webhook: str = "http://diagnostic-agent:8000/alert"
     agent_container_name: str = "diagnostic-agent"
     agent_host_port: int = 8001
     shared_docker_network: str = ""
@@ -143,7 +149,7 @@ class InstallParams:
     agent_image: str = "ghcr.io/mskrado/diagnostic-agent:latest"
     agent_host_port: int = 8001
     agent_container_name: str = "diagnostic-agent"
-    webhook_url: str = "http://diagnostic-agent:8000/webhook"
+    webhook_url: str = "http://diagnostic-agent:8000/alert"
     docker_network: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""

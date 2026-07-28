@@ -35,14 +35,20 @@ def _add_workspace_arg(parser: argparse.ArgumentParser) -> None:
 def _apply_workspace_env(ws: Workspace) -> None:
     """Feed the workspace into Settings for commands that run the agent.
 
-    ``setdefault`` so an explicit environment variable still wins, matching the
-    precedence documented in :mod:`app.profile.loader`.
+    Explicit non-empty environment variables still win (precedence documented in
+    :mod:`app.profile.loader`). Empty strings are treated as unset: the published
+    image historically shipped ``AGENT_PROFILE_DIR=""``, and ``setdefault`` would
+    leave that empty value in place — shadowing the mounted workspace profile.
     """
-    if ws.profile_dir:
-        os.environ.setdefault("AGENT_PROFILE_DIR", str(ws.profile_dir))
-    if ws.runbooks_dir:
-        os.environ.setdefault("AGENT_RUNBOOKS_PATH", str(ws.runbooks_dir))
-    os.environ.setdefault("AGENT_DEFAULT_PRESET", ws.preset)
+    def _blank(name: str) -> bool:
+        return not (os.environ.get(name) or "").strip()
+
+    if ws.profile_dir and _blank("AGENT_PROFILE_DIR"):
+        os.environ["AGENT_PROFILE_DIR"] = str(ws.profile_dir)
+    if ws.runbooks_dir and _blank("AGENT_RUNBOOKS_PATH"):
+        os.environ["AGENT_RUNBOOKS_PATH"] = str(ws.runbooks_dir)
+    if _blank("AGENT_DEFAULT_PRESET"):
+        os.environ["AGENT_DEFAULT_PRESET"] = ws.preset
 
 
 def _package_version() -> str:
@@ -113,6 +119,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         )
 
     profile = ws.profile()
+    if profile.load_errors:
+        errors.extend(profile.load_errors)
     rules = profile.redaction.rules
     print(f"redaction={len(rules)} rules {[r.name for r in rules]}")
     if not rules:

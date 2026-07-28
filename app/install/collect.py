@@ -7,9 +7,11 @@ from typing import Any
 
 from .models import (
     HEALTH_PATHS,
+    MAILPIT_SMTP_PORT,
     DiscoveryReport,
     InstallParams,
     ReachabilityMatrix,
+    ToolEndpoint,
     ToolKind,
 )
 from .prompt import Prompter, container_rewrite
@@ -145,7 +147,7 @@ def _seed_params(
     params.webhook_url = _first(
         overrides.get("webhook_url"),
         matrix.alertmanager_to_agent_webhook,
-        "http://diagnostic-agent:8000/webhook",
+        "http://diagnostic-agent:8000/alert",
     )
     params.docker_network = matrix.shared_docker_network
     params.agent_host_port = matrix.agent_host_port
@@ -302,7 +304,7 @@ def _confirm_core_parameters(
             default=(
                 params.webhook_url
                 or matrix.alertmanager_to_agent_webhook
-                or "http://diagnostic-agent:8000/webhook"
+                or "http://diagnostic-agent:8000/alert"
             ),
             allow_empty=False,
             help_text="Must be routable from Alertmanager, not from your shell.",
@@ -383,6 +385,65 @@ def _resolve_preset(
     return "generic-prometheus"
 
 
+def _default_embed_provider(chat_provider: str) -> str:
+    """Embeddings provider for a chat provider (must not copy chat id blindly).
+
+    ``bedrock_converse`` is a chat-only LangChain id; embeddings use ``bedrock``.
+    """
+    return {
+        "bedrock_converse": "bedrock",
+        "bedrock": "bedrock",
+        "openai": "openai",
+        "google_genai": "google_genai",
+        "anthropic": "openai",
+        "ollama": "ollama",
+    }.get(chat_provider, "ollama")
+
+
+def _default_embed_model(chat_provider: str) -> str:
+    return {
+        "bedrock_converse": "amazon.titan-embed-text-v2:0",
+        "bedrock": "amazon.titan-embed-text-v2:0",
+        "openai": "text-embedding-3-small",
+        "google_genai": "text-embedding-004",
+        "anthropic": "text-embedding-3-small",
+        "ollama": "nomic-embed-text",
+    }.get(chat_provider, "nomic-embed-text")
+
+
+def _default_chat_model(chat_provider: str) -> str:
+    return {
+        "bedrock_converse": "amazon.nova-micro-v1:0",
+        "bedrock": "amazon.nova-micro-v1:0",
+        "openai": "gpt-4o-mini",
+        "google_genai": "gemini-1.5-flash",
+        "anthropic": "claude-3-5-haiku-latest",
+        "ollama": "mistral:7b-instruct",
+    }.get(chat_provider, "mistral:7b-instruct")
+
+
+def _apply_bedrock_region_kwargs(
+    params: InstallParams,
+    overrides: dict[str, Any],
+) -> None:
+    region = _first(
+        overrides.get("aws_region"),
+        os.environ.get("AWS_REGION"),
+        params.aws_region,
+        "us-east-1",
+    )
+    params.aws_region = region
+    region_kwargs = json.dumps({"region_name": region})
+    if overrides.get("chat_model_kwargs"):
+        params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
+    elif not params.chat_model_kwargs or params.chat_model_kwargs == "{}":
+        params.chat_model_kwargs = region_kwargs
+    if overrides.get("embed_model_kwargs"):
+        params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
+    elif not params.embed_model_kwargs or params.embed_model_kwargs == "{}":
+        params.embed_model_kwargs = region_kwargs
+
+
 def _seed_llm_from_environment(
     params: InstallParams,
     report: DiscoveryReport,
@@ -390,16 +451,28 @@ def _seed_llm_from_environment(
 ) -> bool:
     """Populate LLM fields from overrides / discovery / env. Return True if seeded."""
     if overrides.get("chat_provider"):
-        params.chat_provider = str(overrides["chat_provider"])
-        params.chat_model = str(overrides.get("chat_model") or params.chat_model)
-        params.embed_provider = str(
-            overrides.get("embed_provider") or params.chat_provider
+        chat = str(overrides["chat_provider"])
+        if chat == "bedrock":
+            chat = "bedrock_converse"
+        params.chat_provider = chat
+        params.chat_model = str(
+            overrides.get("chat_model") or _default_chat_model(chat)
         )
-        params.embed_model = str(overrides.get("embed_model") or params.embed_model)
-        if overrides.get("chat_model_kwargs"):
-            params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
-        if overrides.get("embed_model_kwargs"):
-            params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
+        # Do NOT copy chat_provider into embed_provider — bedrock_converse is
+        # chat-only, and the InstallParams default embed model is Ollama's.
+        params.embed_provider = str(
+            overrides.get("embed_provider") or _default_embed_provider(chat)
+        )
+        params.embed_model = str(
+            overrides.get("embed_model") or _default_embed_model(chat)
+        )
+        if chat == "bedrock_converse":
+            _apply_bedrock_region_kwargs(params, overrides)
+        else:
+            if overrides.get("chat_model_kwargs"):
+                params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
+            if overrides.get("embed_model_kwargs"):
+                params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
         report.decisions.append(f"LLM seed -> {params.chat_provider} (override)")
         return True
 
@@ -668,6 +741,43 @@ def _resolve_llm(
     _confirm_llm(params, report, prompter, allow_degraded=allow_degraded)
 
 
+def _mailpit_smtp_host(mailpit: ToolEndpoint) -> str:
+    """Pick an SMTP host the agent container can reach for Mailpit."""
+    if mailpit.container_name:
+        return mailpit.container_name
+    return "host.docker.internal"
+
+
+def _seed_mailpit_smtp(params: InstallParams, report: DiscoveryReport) -> bool:
+    """Seed Mailpit client SMTP settings when Mailpit is present.
+
+    Mailpit is usable when HTTP-reachable *or* when Docker found the container
+    (SMTP is on :1025 even if the UI probe failed).
+    """
+    mailpit = report.tool(ToolKind.MAILPIT)
+    if not mailpit or not (mailpit.reachable or mailpit.container_name):
+        return False
+    params.email_enabled = True
+    params.smtp_host = _mailpit_smtp_host(mailpit)
+    params.smtp_port = MAILPIT_SMTP_PORT
+    params.smtp_from = params.smtp_from or "diagnostic-agent@localhost"
+    params.smtp_username = ""
+    params.smtp_password = ""
+    params.smtp_starttls = False
+    report.decisions.append(
+        f"SMTP seed -> Mailpit ({params.smtp_host}:{MAILPIT_SMTP_PORT})"
+    )
+    return True
+
+
+def _apply_mailpit_smtp_defaults(params: InstallParams) -> None:
+    """Interactive fallback: Mailpit-style client settings (no auth / no TLS)."""
+    if not params.smtp_host:
+        params.smtp_host = "host.docker.internal"
+    if not params.smtp_port:
+        params.smtp_port = MAILPIT_SMTP_PORT
+
+
 def _resolve_smtp(
     params: InstallParams,
     report: DiscoveryReport,
@@ -676,23 +786,16 @@ def _resolve_smtp(
     *,
     non_interactive: bool,
 ) -> None:
-    mailpit = report.tool(ToolKind.MAILPIT)
     if overrides.get("email_enabled") is False:
         params.email_enabled = False
         return
 
-    if mailpit and mailpit.reachable:
-        params.email_enabled = True
-        params.smtp_host = (
-            mailpit.container_name if mailpit.container_name else "127.0.0.1"
-        )
-        params.smtp_port = 1025
-        params.smtp_from = "diagnostic-agent@localhost"
-        report.decisions.append(f"SMTP seed -> Mailpit ({params.smtp_host}:1025)")
+    if _seed_mailpit_smtp(params, report):
+        pass
     elif overrides.get("smtp_host"):
         params.email_enabled = True
         params.smtp_host = str(overrides["smtp_host"])
-        params.smtp_port = int(overrides.get("smtp_port") or 587)
+        params.smtp_port = int(overrides.get("smtp_port") or MAILPIT_SMTP_PORT)
         params.smtp_from = str(overrides.get("smtp_from") or params.smtp_from)
         params.email_to = str(overrides.get("email_to") or params.email_to)
         report.decisions.append(f"SMTP seed -> {params.smtp_host}:{params.smtp_port}")
@@ -700,6 +803,8 @@ def _resolve_smtp(
         params.email_enabled = False
         report.decisions.append("SMTP disabled (non-interactive, no Mailpit)")
         return
+    else:
+        _apply_mailpit_smtp_defaults(params)
 
     if non_interactive:
         return
@@ -708,16 +813,20 @@ def _resolve_smtp(
     if not prompter.yes_no(
         "Enable diagnostic email delivery?",
         default=params.email_enabled,
-        help_text="The agent's hypothesis report, separate from Alertmanager mail.",
+        help_text=(
+            "The agent's hypothesis report, separate from Alertmanager mail. "
+            "Defaults target Mailpit (container or host.docker.internal :1025)."
+        ),
     ):
         params.email_enabled = False
         report.decisions.append("SMTP confirmed disabled")
         return
 
     params.email_enabled = True
+    _apply_mailpit_smtp_defaults(params)
     params.smtp_host = prompter.text(
         "SMTP host",
-        default=params.smtp_host or "localhost",
+        default=params.smtp_host,
         allow_empty=False,
     )
     if params.smtp_host in ("localhost", "127.0.0.1", "::1"):
@@ -728,7 +837,9 @@ def _resolve_smtp(
         report.warnings.append(
             f"SMTP host {params.smtp_host} may be unreachable from the container"
         )
-    params.smtp_port = prompter.port("SMTP port", default=params.smtp_port or 587)
+    params.smtp_port = prompter.port(
+        "SMTP port", default=params.smtp_port or MAILPIT_SMTP_PORT
+    )
     params.smtp_from = prompter.text("From address", default=params.smtp_from)
     params.email_to = prompter.text("To address", default=params.email_to)
     params.smtp_username = prompter.text(

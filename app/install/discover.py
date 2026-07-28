@@ -419,12 +419,12 @@ def _build_reachability(report: DiscoveryReport, *, target: str) -> Reachability
 
     if matrix.agent_placement == "same_docker_network":
         matrix.alertmanager_to_agent_webhook = (
-            f"http://{matrix.agent_container_name}:8000/webhook"
+            f"http://{matrix.agent_container_name}:8000/alert"
         )
     elif matrix.agent_placement == "remote_target":
         host = _target_host(target)
         matrix.alertmanager_to_agent_webhook = (
-            f"http://{host}:{matrix.agent_host_port}/webhook"
+            f"http://{host}:{matrix.agent_host_port}/alert"
         )
         matrix.notes.append(
             "Remote target: confirm the agent host is routable from Alertmanager"
@@ -432,7 +432,7 @@ def _build_reachability(report: DiscoveryReport, *, target: str) -> Reachability
     else:
         # Alertmanager in Docker talking to an agent published on the host.
         matrix.alertmanager_to_agent_webhook = (
-            f"http://host.docker.internal:{matrix.agent_host_port}/webhook"
+            f"http://host.docker.internal:{matrix.agent_host_port}/alert"
         )
         matrix.notes.append(
             "Standalone local: AM->agent uses host.docker.internal "

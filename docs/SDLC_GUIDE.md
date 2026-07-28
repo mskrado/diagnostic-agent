@@ -8,6 +8,8 @@ Host projects (for example publishi.ai) keep **thin** workspace config under the
 
 ## Table of Contents
 
+Topics:
+
 1. [Architecture at a Glance](#1-architecture-at-a-glance)
 2. [Environments](#2-environments)
 3. [Local Development](#3-local-development)

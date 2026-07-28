@@ -118,3 +118,23 @@ def test_spring_modular_monolith_service_map_resolves_gateway():
     dep = DependencyMap.load(profile.service_map_path)
     assert "api-gateway" in dep.known_services()
     assert dep.kind("platform-service") == "monolith"
+
+
+def test_unparseable_profile_yaml_recorded_as_load_error(tmp_path):
+    """Broken overlay YAML must not silently fall back to preset-only config."""
+    (tmp_path / "metrics_profile.yaml").write_text(
+        "extends: spring-micrometer\n"
+        "templates:\n"
+        "  bad: [unterminated\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "redaction.yaml").write_text(
+        "extends: generic-prometheus\n",
+        encoding="utf-8",
+    )
+    profile = build_profile(profile_dir=tmp_path, default_preset="generic-prometheus")
+    assert profile.load_errors
+    assert any("metrics_profile.yaml" in e for e in profile.load_errors)
+    # Redaction from the intact file still loads; the broken section is skipped.
+    assert profile.redaction.rules
+
