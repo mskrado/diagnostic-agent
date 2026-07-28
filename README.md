@@ -50,6 +50,10 @@ diag install --output ./deploy
 # then follow ./deploy/APPLY.md
 ```
 
+If Windows `pip` warns that `diag.exe` is not on PATH, see
+[Putting `diag` on PATH](docs/INSTALL.md#putting-diag-on-path) (or run
+`python -m app.cli install --output ./deploy`).
+
 ## Quick start (hello-world workspace)
 
 ```bash

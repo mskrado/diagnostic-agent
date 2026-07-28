@@ -9,6 +9,15 @@ pip install -e ".[dev]"   # or: pip install diagnostic-agent
 diag install --output ./deploy
 ```
 
+If `pip` warns that `diag.exe` / `diagnostic-agent.exe` were installed in a
+`Scripts` directory that is **not on PATH** (common on Windows user installs),
+see [Putting `diag` on PATH](#putting-diag-on-path). Until then you can always
+run:
+
+```bash
+python -m app.cli install --output ./deploy
+```
+
 This guide covers **interactive** and **non-interactive** modes, every parameter
 that is collected (why it exists, required vs optional), examples, and what to
 do after generation.
@@ -29,7 +38,8 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 8. [Graceful degradation](#graceful-degradation)
 9. [Troubleshooting](#troubleshooting)
 10. [Requirements](#requirements)
-11. [Quick recipe card](#quick-recipe-card)
+11. [Putting `diag` on PATH](#putting-diag-on-path)
+12. [Quick recipe card](#quick-recipe-card)
 
 ---
 
@@ -514,6 +524,7 @@ partial bundle.
 | `--start` health fail | Port conflict or image pull | Check `8001`, `docker compose logs`, image pin |
 | SSH discovery empty | BatchMode / keys | Ensure `ssh -o BatchMode=yes user@host docker ps` works |
 | Windows console Unicode errors | Old installer build | Use current release (ASCII status markers) |
+| `diag` / `diag.exe` not recognized | Scripts dir not on PATH | See [Putting `diag` on PATH](#putting-diag-on-path); or use `python -m app.cli …` |
 
 ---
 
@@ -527,6 +538,65 @@ Thin wrappers (same args as `diag install`):
 ```bash
 ./scripts/diag-install.sh --output ./deploy
 pwsh ./scripts/diag-install.ps1 --output ./deploy
+```
+
+---
+
+## Putting `diag` on PATH
+
+`pip install -e .` (or `pip install diagnostic-agent`) installs console scripts
+`diag` and `diagnostic-agent`. On Windows, a user-site install often prints:
+
+```text
+WARNING: The scripts diag.exe and diagnostic-agent.exe are installed in
+'...\AppData\Roaming\Python\Python3XX\Scripts' which is not on PATH.
+```
+
+That means the package installed successfully; the shell just cannot find
+`diag.exe` yet.
+
+### Option A — this PowerShell session only
+
+```powershell
+$env:PATH = "$env:APPDATA\Python\Python314\Scripts;$env:PATH"
+diag --help
+```
+
+Adjust `Python314` to match your interpreter (see the path in the pip warning).
+
+### Option B — permanent User PATH (Windows)
+
+```powershell
+$scripts = "$env:APPDATA\Python\Python314\Scripts"   # match the pip warning
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  "$scripts;" + [Environment]::GetEnvironmentVariable("Path", "User"),
+  "User"
+)
+```
+
+Open a **new** PowerShell window, then run `diag --help`.
+
+### Option C — virtual environment (recommended for development)
+
+Activating a venv puts its `Scripts` (Windows) or `bin` (Unix) on PATH
+automatically:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # Windows
+# source .venv/bin/activate           # Unix
+pip install -e ".[dev]"
+diag install --output ./deploy
+```
+
+### Always works without PATH changes
+
+From the repo root (or any env where the package is importable):
+
+```bash
+python -m app.cli install --output ./deploy
+# or: python -m app.cli --help
 ```
 
 ---
