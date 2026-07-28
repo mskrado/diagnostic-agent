@@ -4,6 +4,9 @@ This guide shows how to wire the agent into an existing stack **without
 modifying agent code**. You supply a **workspace** — configuration and content
 in your own repository — and the published agent does the rest.
 
+Related docs: [INSTALL.md](INSTALL.md) · [WORKSPACE.md](WORKSPACE.md) ·
+[INSTALL_OPERATOR.md](INSTALL_OPERATOR.md)
+
 ---
 
 ## Topics
@@ -27,11 +30,14 @@ in your own repository — and the published agent does the rest.
 
 ## 2. Create a workspace
 
-**Preferred:** run the installer so discovery fills endpoints and generates
-alert/Alertmanager wiring for you — see [INSTALL.md](INSTALL.md):
+**Preferred:** run the installer so discovery fills endpoints and generates a
+**self-sufficient** workspace (profiles, runbooks, `blind_eval.yaml`) plus
+alert/Alertmanager wiring — see [INSTALL.md](INSTALL.md). For LLM-assisted
+onboarding against a live stack, use [INSTALL_OPERATOR.md](INSTALL_OPERATOR.md).
 
 ```bash
 diag install --output ./deploy
+# or: python -m app.cli install --output ./deploy
 ```
 
 **Manual:** copy `examples/hello-world/` into your repository and edit:
@@ -160,25 +166,33 @@ route:
 ## 4. Docker Compose snippet
 
 ```yaml
+name: myapp-agent   # pin a unique project name (install does this for you)
 services:
   diagnostic-agent:
     image: ghcr.io/mskrado/diagnostic-agent:latest
+    container_name: diagnostic-agent
     # For local iteration against this repo:
     # build: ./diagnostic-agent
     ports:
       - "8001:8000"
     environment:
+      AGENT_WORKSPACE: /workspace
+      # Required: empty AGENT_PROFILE_DIR in older images would shadow the mount
+      AGENT_PROFILE_DIR: /workspace
+      AGENT_RUNBOOKS_PATH: /workspace/runbooks
       AGENT_PROMETHEUS_URL: http://prometheus:9090
       AGENT_LOKI_URL: http://loki:3100
       AGENT_CHAT_PROVIDER: ${AGENT_CHAT_PROVIDER:-ollama}
       AGENT_CHAT_MODEL: ${AGENT_CHAT_MODEL:-mistral:7b-instruct}
       AGENT_RAG_ENABLED: "true"
+      AGENT_REQUIRE_REDACTION: "true"
     volumes:
       - ./infrastructure/diagnostic-agent:/workspace:ro
 ```
 
-The image sets `AGENT_WORKSPACE=/workspace`, so the mount is the only wiring
-needed — no profile or runbook paths to keep in sync.
+Prefer `diag install` so Compose also joins your observability Docker network
+and writes `agent/.env`. The image sets `AGENT_WORKSPACE=/workspace`; pinning
+`AGENT_PROFILE_DIR` / `AGENT_RUNBOOKS_PATH` keeps the mounted profile active.
 
 ## 5. Verify
 

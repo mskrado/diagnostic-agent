@@ -51,6 +51,7 @@ Topics:
 | Agent runtime, tools, presets, default corpus | This repo (`mskrado/diagnostic-agent`) |
 | Host topology, redaction, runbooks, scenarios | Host workspace (see `docs/WORKSPACE.md`) |
 | Install / discover wiring | `docs/INSTALL.md` (`diag install`) |
+| LLM-assisted install against a live stack | `docs/INSTALL_OPERATOR.md` |
 
 ---
 

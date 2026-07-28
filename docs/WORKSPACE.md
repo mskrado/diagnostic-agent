@@ -13,43 +13,75 @@ infrastructure/diagnostic-agent/
 ├── redaction.yaml        # tenant / PII scrubbing (fail-closed)
 ├── service_map.yaml      # topology / blast radius
 ├── scenarios.yaml        # alert → runbook pairs for lint / e2e
-├── blind_eval.yaml       # optional synthetic cases for `diag eval blind`
+├── blind_eval.yaml       # synthetic cases for `diag eval blind` (install seeds this)
 └── runbooks/             # markdown playbooks for RAG
 ```
 
-`diag install` writes the same layout under `deploy/agent/workspace/` as editable
-stubs. Full install-bundle files (`.env`, compose, observability snippets) are
-documented in [INSTALL.md](INSTALL.md#what-gets-generated).
+`diag install` writes the same layout under `<output>/agent/workspace/` as a
+**self-sufficient** bundle: profiles (stubs or the spring modular-monolith
+example), full `runbooks/`, `scenarios.yaml`, and `blind_eval.yaml`. Full
+install-bundle files (`.env`, compose, observability snippets) are documented in
+[INSTALL.md](INSTALL.md#what-gets-generated).
 
-Because the manifest declares every path, commands take no path arguments:
-
-```bash
-docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
-  ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
-```
+Because the manifest declares every path, commands take no path arguments — see
+[Validate with the published image](#validate-with-the-published-image).
 
 ---
 
 ## Topics
 
-1. [Locating the workspace](#locating-the-workspace)
-2. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
-3. [Manifest (`agent.yaml`)](#manifest-agentyaml)
-4. [Flat layout](#flat-layout)
-5. [File-by-file reference](#file-by-file-reference)
+1. [Validate with the published image](#validate-with-the-published-image)
+2. [Locating the workspace](#locating-the-workspace)
+3. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
+4. [Manifest (`agent.yaml`)](#manifest-agentyaml)
+5. [Flat layout](#flat-layout)
+6. [File-by-file reference](#file-by-file-reference)
    - [`metrics_profile.yaml`](#metrics_profileyaml)
    - [`logs_profile.yaml`](#logs_profileyaml)
    - [`prompt_profile.yaml`](#prompt_profileyaml)
    - [`redaction.yaml`](#redactionyaml)
    - [`service_map.yaml`](#service_mapyaml)
    - [`scenarios.yaml`](#scenariosyaml)
-   - [`blind_eval.yaml`](#blind_evalyaml-optional)
+   - [`blind_eval.yaml`](#blind_evalyaml)
    - [`runbooks/`](#runbooks)
-6. [Precedence](#precedence)
-7. [Redaction is fail-closed](#redaction-is-fail-closed)
-8. [Validating in CI](#validating-in-ci)
+7. [Precedence](#precedence)
+8. [Redaction is fail-closed](#redaction-is-fail-closed)
+9. [Validating in CI](#validating-in-ci)
 
 ---
+
+## Validate with the published image
+
+Run workspace checks inside the published agent image without installing Python
+locally:
+
+```bash
+docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
+  ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
+```
+
+What each piece does:
+
+| Piece | Meaning |
+|---|---|
+| `docker run --rm` | One-shot container; removed when the command exits |
+| `-v "$PWD/…:/workspace:ro"` | Bind-mount your **host** workspace at `/workspace`, read-only |
+| `ghcr.io/mskrado/diagnostic-agent:<tag>` | Published agent image (replace `<tag>`, e.g. `latest` or `0.2.0`) |
+| `diag validate` | Checks manifest schema, profile/`extends` resolution, redaction rule count, topology parse, and **fails on unparseable profile YAML** |
+
+The image sets `AGENT_WORKSPACE=/workspace`, so validation reads the mounted host
+config — nothing from your laptop's Python env is required. This checks
+**configuration health**, not a live diagnosis (no Prometheus/Loki/LLM needed).
+
+**PowerShell:** prefer `${PWD}` (or an absolute path) so the mount source expands:
+
+```powershell
+docker run --rm -v "${PWD}/infrastructure/diagnostic-agent:/workspace:ro" `
+  ghcr.io/mskrado/diagnostic-agent:latest diag validate
+```
+
+After `diag install`, mount the generated workspace instead, e.g.
+`${PWD}/deploy/agent/workspace`.
 
 ## Locating the workspace
 
@@ -271,8 +303,14 @@ This is the blast-radius graph.
   the alert’s `service=` label.
 
 Without a useful map the agent runs with an **empty** dependency map (no blast
-radius). Install only seeds a starter topology — **edit it to match production
-names**.
+radius). Install seeds topology for you:
+
+| Preset | Seeded `service_map.yaml` |
+|---|---|
+| `generic-prometheus` | Starter 3-tier map (`api` / `app` / `postgres`) — **edit names** |
+| `spring-micrometer` | Full copy from `examples/spring-modular-monolith/` |
+
+**Edit to match production** `service=` / Loki labels before relying on blast radius.
 
 **How to configure.**
 
@@ -300,9 +338,10 @@ Prometheus rule files (those live under install’s `observability/`).
 
 **How to configure.** Keep `labels.alertname` / `service` aligned with both your
 Alertmanager rules and runbook filenames. Install seeds scenarios from the
-shipped alert catalog — trim or extend for your host.
+shipped alert catalog — for `spring-micrometer`, catalog `service=app` is remapped
+to `platform-service`. Trim or extend for your host.
 
-### `blind_eval.yaml` (optional)
+### `blind_eval.yaml`
 
 **Purpose.** Synthetic cases (injected logs + ground truth) for
 `diag eval blind`. Independent of runbooks so answers do not leak via RAG.
@@ -310,8 +349,14 @@ shipped alert catalog — trim or extend for your host.
 **How it is used.** Offline: logs go straight into the prompt. Live
 (`--live-url` / `--loki-url`): logs are pushed to Loki, then `/alert` is fired.
 
-Install workspaces often omit this file. Either add one, copy from
-`eval/blind_eval_dataset.yaml`, or pass `--dataset` explicitly. See
+`diag install` seeds `blind_eval.yaml` from `eval/blind_eval_dataset.yaml` so the
+install tree is enough for:
+
+```bash
+diag eval blind -w ./deploy/agent/workspace --limit 3
+```
+
+Manual workspaces may omit the file and pass `--dataset` instead. See
 [eval/README.md](../eval/README.md).
 
 ### `runbooks/`
@@ -338,8 +383,14 @@ and alert annotations often reference them.
 
 Environment wins so a container can retarget a setting without editing the host
 repository. `AGENT_PROFILE_DIR` and `AGENT_RUNBOOKS_PATH` are derived from the
-workspace only when they are not already set. Runtime URLs and LLM settings
-normally live in `agent/.env` from install — see [INSTALL.md](INSTALL.md).
+workspace only when they are unset **or blank**. An empty string
+(`AGENT_PROFILE_DIR=""`) is treated as unset so it cannot shadow a mounted
+workspace — older images shipped that empty value. Generated Compose also pins
+both paths to `/workspace`. Runtime URLs and LLM settings normally live in
+`agent/.env` from install — see [INSTALL.md](INSTALL.md).
+
+Unparseable profile YAML is a hard failure: `diag validate` reports
+`load_errors`, and the agent refuses to start with a silent preset fallback.
 
 ## Redaction is fail-closed
 
@@ -350,10 +401,18 @@ silently disable redaction — the fail-closed guard exists for that case.
 
 ## Validating in CI
 
+Same mount pattern as [Validate with the published image](#validate-with-the-published-image);
+add `diag lint` for corpus checks:
+
 ```bash
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<tag> sh -c "diag validate && diag lint"
 ```
 
-`validate` covers configuration; `lint` covers content. Neither needs LLM
-credentials or a running stack. Add `diag e2e --url` once an agent is deployed.
+| Command | Covers |
+|---|---|
+| `diag validate` | Configuration: manifest, profile resolution, YAML parse errors, redaction count, topology parse |
+| `diag lint` | Content: runbook / scenario corpus consistency |
+
+Neither needs LLM credentials or a running observability stack. Add
+`diag e2e --url` once an agent is deployed.

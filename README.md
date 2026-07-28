@@ -29,6 +29,7 @@ Additional documentation:
 | Document | Covers |
 |---|---|
 | [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
+| [docs/INSTALL_OPERATOR.md](docs/INSTALL_OPERATOR.md) | LLM-assisted install against an existing stack: copy-paste prompt, clarification checklist, success criteria |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
 | [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |

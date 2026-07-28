@@ -9,11 +9,21 @@ pip install -e ".[dev]"   # or: pip install diagnostic-agent
 diag install --output ./deploy
 ```
 
+If `pip` warns that `diag.exe` / `diagnostic-agent.exe` were installed in a
+`Scripts` directory that is **not on PATH** (common on Windows user installs),
+see [Putting `diag` on PATH](#putting-diag-on-path). Until then you can always
+run:
+
+```bash
+python -m app.cli install --output ./deploy
+```
+
 This guide covers **interactive** and **non-interactive** modes, every parameter
 that is collected (why it exists, required vs optional), examples, and what to
 do after generation.
 
-Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
+Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
+[INSTALL_OPERATOR.md](INSTALL_OPERATOR.md) (LLM-assisted install prompt)
 
 ---
 
@@ -29,7 +39,8 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 8. [Graceful degradation](#graceful-degradation)
 9. [Troubleshooting](#troubleshooting)
 10. [Requirements](#requirements)
-11. [Quick recipe card](#quick-recipe-card)
+11. [Putting `diag` on PATH](#putting-diag-on-path)
+12. [Quick recipe card](#quick-recipe-card)
 
 ---
 
@@ -319,6 +330,10 @@ Host port **8001** maps to container port **8000** in the generated compose file
 (`agent_host_port`). Override with `--webhook-url` when your network topology
 differs (e.g. Kubernetes service DNS, reverse proxy).
 
+The path is always **`/alert`** — that is the only route `app.main` serves.
+Do not point Alertmanager at `/webhook`; those POSTs return 404 and the agent
+never runs.
+
 ### C. Metrics / logs preset
 
 | Parameter | Flag | Required? | Why |
@@ -359,6 +374,12 @@ Diagnosis is LLM-backed. You need a **chat** provider and (for RAG runbooks) an
 5. `GOOGLE_API_KEY` → Google GenAI  
 6. Interactive: prompt for provider  
 7. Non-interactive: fall back to `ollama` with a warning  
+
+When you force `--chat-provider bedrock_converse` (or `bedrock`), install sets
+`AGENT_EMBED_PROVIDER=bedrock`, `AGENT_EMBED_MODEL=amazon.titan-embed-text-v2:0`,
+and `{"region_name": …}` in both chat and embed kwargs (from `AWS_REGION` /
+`--` overrides). It does **not** copy the chat provider id into embeddings —
+`bedrock_converse` is chat-only.
 
 ### E. Grafana annotations
 
@@ -441,23 +462,20 @@ generated files repeat the same instructions.
 | Path | Role | What you do after install |
 |---|---|---|
 | `agent/.env` | Runtime settings: Prometheus/Loki/Grafana URLs, LLM provider + models, SMTP, redaction/RAG flags, image pin. Loaded by Compose via `env_file`. | Fill secrets (API keys, `AGENT_GRAFANA_TOKEN`, AWS keys if Bedrock). Keep `AGENT_DEFAULT_PRESET` aligned with `workspace/agent.yaml` `extends`. **Do not commit.** |
-| `agent/docker-compose.yml` | Runs the published image, mounts `./workspace` → `/workspace:ro`, joins the discovered Docker network when present. | `docker compose --env-file .env up -d`. Adjust published port or image pin if needed. |
+| `agent/docker-compose.yml` | Runs the published image, mounts `./workspace` → `/workspace:ro`, joins the discovered Docker network when present. Pins Compose `name: <output>-agent` so sibling bundles do not share project `agent`. Sets `AGENT_PROFILE_DIR` / `AGENT_RUNBOOKS_PATH` to `/workspace` so an empty image env cannot shadow the mount. | `docker compose --env-file .env up -d`. Adjust published port, `container_name`, or image pin if needed. |
 | `agent/Dockerfile` | Optional thin `FROM` wrapper around the GHCR image. | Prefer pulling the image via Compose; build only if your registry policy requires it. |
-| `agent/workspace/*` | Integration profile + runbooks the agent reads on every diagnosis. | Edit `service_map.yaml` and profile overlays to match your stack; see WORKSPACE.md. |
+| `agent/workspace/*` | Self-sufficient integration profile + full runbook corpus + `blind_eval.yaml`. | Edit `service_map.yaml` / overlays to match production names; see WORKSPACE.md. Spring preset is seeded from `examples/spring-modular-monolith/`. |
 | `observability/prometheus/alert-rules.generated.yml` | Alert rule group intersecting the shipped runbook catalog. | **Merge** into Prometheus `rule_files` (not a full replacement), then reload. |
-| `observability/alertmanager/route.generated.yml` | Additive route/receiver → agent webhook. | Merge into Alertmanager config and reload. |
+| `observability/alertmanager/route.generated.yml` | Additive route/receiver → agent webhook (`…/alert`). | Merge into Alertmanager config and reload. |
 | `observability/promtail/promtail.generated.yaml` | Snippet reminding you to emit `service=` labels. | Align scrapes with `service_map.yaml` names. |
 | `observability/grafana/README.md` | How to mint a service-account token for annotations. | Optional; skip if annotations stay off. |
 | `install-report.json` | Discovery inventory, decisions, warnings (secrets redacted). | Review placement/URLs before applying. |
-| `APPLY.md` | Ordered apply checklist tailored to this install. | Follow top to bottom, then health-check the agent. |
+| `APPLY.md` | Ordered apply checklist + blind-eval commands for this install. | Follow top to bottom, then health-check the agent. |
 
-Alert rules are **only** the alerts that intersect the shipped runbook corpus
-(so the agent can actually diagnose them). They are not a full replacement for
-your existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 | Preset | Workspace profile seeding |
 |---|---|
-| `generic-prometheus` | Thin `extends:` stubs + starter 3-tier `service_map.yaml` |
-| `spring-micrometer` | Copied from `examples/spring-modular-monolith/` (service map, logs filters, tenant redaction, prompt) |
+| `generic-prometheus` | Documented `extends:` stubs + starter 3-tier `service_map.yaml` |
+| `spring-micrometer` | Copied from `examples/spring-modular-monolith/` (service map, logs filters, tenant redaction, prompt); scenarios remap `service=app` → `platform-service` |
 
 Alert rules are **only** the alerts that intersect the shipped runbook catalog
 (so the agent can diagnose them). They are not a full replacement for your
@@ -528,12 +546,15 @@ partial bundle.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Prometheus is required but was not reachable` | Prom down or wrong host | Start Prometheus or pass `--prometheus-url` |
-| Agent healthy but never fires | Webhook URL not reachable from AM | Check placement table; set `--webhook-url`; open AM silences/logs |
-| Empty metrics in reports | Wrong `--preset` or `service=` labels | Align preset + service map + PromQL labels |
-| `0 redaction rules` / validate fail | Broken `extends:` chain | Keep `redaction.yaml` with `extends: <preset>` |
-| `--start` health fail | Port conflict or image pull | Check `8001`, `docker compose logs`, image pin |
+| Agent healthy but never fires | Webhook URL not reachable from AM, or path is `/webhook` | Use `…/alert`; check placement table; set `--webhook-url`; open AM silences/logs |
+| Empty metrics in reports | Wrong `--preset` or `service=` labels | Align preset + service map + PromQL labels (verify series exist in Prometheus) |
+| `0 redaction rules` / validate fail | Broken `extends:` chain or unparseable profile YAML | Keep `redaction.yaml` with `extends: <preset>`; `diag validate` now fails on YAML parse errors |
+| `--start` health fail / long `unhealthy` | Port conflict, image pull, or RAG embedding still indexing | Check `8001`, `docker compose logs`, image pin; Bedrock Titan indexing of the full corpus can take a few minutes on first start |
+| Second install recreates the first agent | Compose project name collision | Generated compose pins `name: <output-dir>-agent`; do not remove it |
+| Profile ignored / redaction abort after start | Empty `AGENT_PROFILE_DIR` shadowing the mount | Compose pins `AGENT_PROFILE_DIR=/workspace`; do not clear it |
 | SSH discovery empty | BatchMode / keys | Ensure `ssh -o BatchMode=yes user@host docker ps` works |
 | Windows console Unicode errors | Old installer build | Use current release (ASCII status markers) |
+| `diag` / `diag.exe` not recognized | Scripts dir not on PATH | See [Putting `diag` on PATH](#putting-diag-on-path); or use `python -m app.cli …` |
 
 ---
 
@@ -547,6 +568,65 @@ Thin wrappers (same args as `diag install`):
 ```bash
 ./scripts/diag-install.sh --output ./deploy
 pwsh ./scripts/diag-install.ps1 --output ./deploy
+```
+
+---
+
+## Putting `diag` on PATH
+
+`pip install -e .` (or `pip install diagnostic-agent`) installs console scripts
+`diag` and `diagnostic-agent`. On Windows, a user-site install often prints:
+
+```text
+WARNING: The scripts diag.exe and diagnostic-agent.exe are installed in
+'...\AppData\Roaming\Python\Python3XX\Scripts' which is not on PATH.
+```
+
+That means the package installed successfully; the shell just cannot find
+`diag.exe` yet.
+
+### Option A — this PowerShell session only
+
+```powershell
+$env:PATH = "$env:APPDATA\Python\Python314\Scripts;$env:PATH"
+diag --help
+```
+
+Adjust `Python314` to match your interpreter (see the path in the pip warning).
+
+### Option B — permanent User PATH (Windows)
+
+```powershell
+$scripts = "$env:APPDATA\Python\Python314\Scripts"   # match the pip warning
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  "$scripts;" + [Environment]::GetEnvironmentVariable("Path", "User"),
+  "User"
+)
+```
+
+Open a **new** PowerShell window, then run `diag --help`.
+
+### Option C — virtual environment (recommended for development)
+
+Activating a venv puts its `Scripts` (Windows) or `bin` (Unix) on PATH
+automatically:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # Windows
+# source .venv/bin/activate           # Unix
+pip install -e ".[dev]"
+diag install --output ./deploy
+```
+
+### Always works without PATH changes
+
+From the repo root (or any env where the package is importable):
+
+```bash
+python -m app.cli install --output ./deploy
+# or: python -m app.cli --help
 ```
 
 ---
