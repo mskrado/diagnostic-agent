@@ -32,6 +32,16 @@ def _check_redaction() -> tuple[str, ...]:
     raw tenant identifiers into reports, audit records, and annotations. Set
     AGENT_REQUIRE_REDACTION=false to accept that risk deliberately.
     """
+    from .profile import get_profile
+
+    profile = get_profile()
+    if profile.load_errors:
+        raise RuntimeError(
+            "Integration profile YAML failed to parse (refusing to start with "
+            "silent preset fallback):\n  - "
+            + "\n  - ".join(profile.load_errors)
+        )
+
     names = active_rule_names()
     if names:
         return names

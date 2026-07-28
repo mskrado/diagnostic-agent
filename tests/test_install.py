@@ -98,7 +98,7 @@ def test_reachability_same_docker_network():
     matrix = _build_reachability(report, target="local")
     assert matrix.agent_placement == "same_docker_network"
     assert matrix.agent_to_prometheus == "http://prometheus:9090"
-    assert matrix.alertmanager_to_agent_webhook.endswith(":8000/webhook")
+    assert matrix.alertmanager_to_agent_webhook.endswith(":8000/alert")
 
 
 def test_reachability_standalone_uses_host_docker_internal():
@@ -169,7 +169,7 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch, no_llm_env, no_p
             "http://prom:9090",
             "http://loki:3100",
             "http://am:9093",
-            "http://agent:8000/webhook",
+            "http://agent:8000/alert",
             "",  # skip Grafana
             "ollama",  # LLM provider
             "",  # chat model default
@@ -186,7 +186,7 @@ def test_collect_prompts_for_missing_required_urls(monkeypatch, no_llm_env, no_p
     assert params.prometheus_url == "http://prom:9090"
     assert params.loki_url == "http://loki:3100"
     assert params.alertmanager_url == "http://am:9093"
-    assert params.webhook_url == "http://agent:8000/webhook"
+    assert params.webhook_url == "http://agent:8000/alert"
     assert params.chat_provider == "ollama"
     assert params.webhook_disabled is False
     assert params.metrics_only is False
@@ -203,7 +203,7 @@ def _discovered_report() -> DiscoveryReport:
         agent_to_loki="http://loki:3100",
         agent_to_alertmanager="http://alertmanager:9093",
         agent_to_grafana="http://grafana:3000",
-        alertmanager_to_agent_webhook="http://diagnostic-agent:8000/webhook",
+        alertmanager_to_agent_webhook="http://diagnostic-agent:8000/alert",
     )
     report.tools = [
         ToolEndpoint(
@@ -225,7 +225,7 @@ def test_collect_confirms_discovered_defaults(monkeypatch, no_llm_env, no_probe)
     assert params.loki_url == "http://loki:3100"
     assert params.alertmanager_url == "http://alertmanager:9093"
     assert params.grafana_url == "http://grafana:3000"
-    assert params.webhook_url == "http://diagnostic-agent:8000/webhook"
+    assert params.webhook_url == "http://diagnostic-agent:8000/alert"
     assert params.chat_provider == "ollama"
     assert any("interactive confirm: every parameter" in d for d in report.decisions)
     assert any("LLM confirmed" in d for d in report.decisions)
@@ -259,7 +259,7 @@ def test_loopback_endpoint_rewritten_for_container(monkeypatch, no_llm_env, no_p
         agent_to_prometheus="http://127.0.0.1:9090",
         agent_to_loki="http://127.0.0.1:3100",
         agent_to_alertmanager="http://127.0.0.1:9093",
-        alertmanager_to_agent_webhook="http://host.docker.internal:8001/webhook",
+        alertmanager_to_agent_webhook="http://host.docker.internal:8001/alert",
     )
     monkeypatch.setattr("builtins.input", lambda *_a, **_k: "")
     monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: "")
@@ -404,7 +404,7 @@ def _complete_report() -> DiscoveryReport:
         agent_to_prometheus="http://127.0.0.1:9090",
         agent_to_loki="http://127.0.0.1:3100",
         agent_to_alertmanager="http://127.0.0.1:9093",
-        alertmanager_to_agent_webhook="http://host.docker.internal:8001/webhook",
+        alertmanager_to_agent_webhook="http://host.docker.internal:8001/alert",
     )
     report.tools = [
         ToolEndpoint(
@@ -686,3 +686,62 @@ def test_mailpit_default_ports_and_health():
     assert DEFAULT_PORTS[ToolKind.MAILPIT] == 8025
     assert MAILPIT_SMTP_PORT == 1025
     assert "/api/v1/info" in HEALTH_PATHS[ToolKind.MAILPIT]
+
+
+def test_bedrock_chat_provider_override_sets_titan_embeddings(no_llm_env, no_probe, monkeypatch):
+    """--chat-provider bedrock_converse must not copy chat id into embed_provider."""
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    report = _complete_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="generic-prometheus",
+        overrides={
+            "chat_provider": "bedrock_converse",
+            "chat_model": "amazon.nova-pro-v1:0",
+        },
+    )
+    assert params.chat_provider == "bedrock_converse"
+    assert params.chat_model == "amazon.nova-pro-v1:0"
+    assert params.embed_provider == "bedrock"
+    assert params.embed_model == "amazon.titan-embed-text-v2:0"
+    assert '"region_name": "eu-west-1"' in params.chat_model_kwargs
+    assert '"region_name": "eu-west-1"' in params.embed_model_kwargs
+
+
+def test_compose_pins_project_name_and_profile_dir(tmp_path: Path, no_llm_env, no_probe):
+    """Sibling install bundles must not share Compose project name ``agent``."""
+    report = _complete_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="generic-prometheus",
+        overrides={"chat_provider": "ollama"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "publishi"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    compose = (out / "agent" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "name: publishi-agent" in compose
+    assert "AGENT_PROFILE_DIR: /workspace" in compose
+    assert "AGENT_RUNBOOKS_PATH: /workspace/runbooks" in compose
+
+
+def test_generated_alertmanager_route_uses_alert_path(tmp_path: Path, no_llm_env, no_probe):
+    report = _complete_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="generic-prometheus",
+        overrides={"chat_provider": "ollama"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    route = (out / "observability" / "alertmanager" / "route.generated.yml").read_text(
+        encoding="utf-8"
+    )
+    assert route.rstrip().endswith("/alert") or "/alert" in route
+    assert ":8000/webhook" not in route
+    assert "/webhook" not in route.split("url:", 1)[-1]
+

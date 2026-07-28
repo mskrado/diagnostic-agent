@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .loader import (
     IntegrationProfile,
+    ProfileLoadError,
     build_profile,
     get_profile,
     list_presets,
@@ -20,6 +21,7 @@ __all__ = [
     "IntegrationProfile",
     "LogsProfile",
     "MetricsProfile",
+    "ProfileLoadError",
     "PromptProfile",
     "RedactionProfile",
     "build_profile",
