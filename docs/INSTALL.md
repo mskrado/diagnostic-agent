@@ -22,7 +22,8 @@ This guide covers **interactive** and **non-interactive** modes, every parameter
 that is collected (why it exists, required vs optional), examples, and what to
 do after generation.
 
-Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
+Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
+[INSTALL_OPERATOR.md](INSTALL_OPERATOR.md) (LLM-assisted install prompt)
 
 ---
 
