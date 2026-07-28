@@ -461,6 +461,46 @@ def test_generate_and_verify(tmp_path: Path):
     errors = verify(out)
     assert errors == [], errors
 
+    workspace = out / "agent" / "workspace"
+    assert (workspace / "blind_eval.yaml").is_file()
+    agent_yaml = (workspace / "agent.yaml").read_text(encoding="utf-8")
+    assert "blind_eval: ./blind_eval.yaml" in agent_yaml
+    runbooks = list((workspace / "runbooks").glob("runbook-*.md"))
+    assert len(runbooks) >= 4
+    from app.workspace import load as load_workspace
+
+    ws = load_workspace(str(workspace))
+    assert ws.blind_eval_path is not None
+    assert ws.blind_eval_path.name == "blind_eval.yaml"
+
+
+def test_generate_spring_seeds_modular_monolith_profile(tmp_path: Path):
+    report = _complete_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        preset="spring-micrometer",
+        overrides={"chat_provider": "ollama"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+    workspace = out / "agent" / "workspace"
+    service_map = (workspace / "service_map.yaml").read_text(encoding="utf-8")
+    assert "platform-service" in service_map
+    assert "module_dependencies" in service_map
+    redaction = (workspace / "redaction.yaml").read_text(encoding="utf-8")
+    assert "tenant_kv" in redaction
+    logs = (workspace / "logs_profile.yaml").read_text(encoding="utf-8")
+    assert "alert_line_filters" in logs
+    scenarios = yaml.safe_load((workspace / "scenarios.yaml").read_text(encoding="utf-8"))
+    high_err = next(s for s in scenarios["scenarios"] if s["id"] == "higherrorrate")
+    assert high_err["labels"]["service"] == "platform-service"
+    assert (workspace / "blind_eval.yaml").is_file()
+    assert verify(out) == []
+    apply = (out / "APPLY.md").read_text(encoding="utf-8")
+    assert "diag eval blind -w ./agent/workspace" in apply
+
 
 def test_verify_rejects_incomplete_bundle_without_allow_degraded(tmp_path: Path):
     report = DiscoveryReport(target="local")
