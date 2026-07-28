@@ -386,6 +386,10 @@ dev. Non-interactive without Mailpit → email stays disabled.
 
 ## What gets generated
 
+The install output is **self-sufficient**. You do **not** need a separate host
+monorepo path for validate / lint / eval / run — everything lives under
+`--output`.
+
 ```text
 <output>/
 ├── agent/
@@ -393,32 +397,37 @@ dev. Non-interactive without Mailpit → email stays disabled.
 │   ├── docker-compose.yml      # agent service + optional external network
 │   ├── .env                    # ALL AGENT_* (+ SDK keys) — do not commit
 │   ├── .gitignore              # ignores .env
-│   └── workspace/
-│       ├── agent.yaml
-│       ├── metrics_profile.yaml / logs_profile.yaml / …
-│       ├── redaction.yaml
-│       ├── service_map.yaml    # EDIT ME
+│   └── workspace/              # complete host workspace
+│       ├── agent.yaml          # includes blind_eval: ./blind_eval.yaml
+│       ├── metrics/logs/prompt/redaction profiles
+│       ├── service_map.yaml    # spring-micrometer: full modular-monolith example
 │       ├── scenarios.yaml
-│       └── runbooks/           # seeded from the catalog the agent can diagnose
+│       ├── blind_eval.yaml     # seeded from eval/blind_eval_dataset.yaml
+│       └── runbooks/           # full runbook-*.md corpus (RAG)
 ├── observability/
 │   ├── prometheus/alert-rules.generated.yml   # merge into rule_files
 │   ├── alertmanager/route.generated.yml       # additive webhook receiver
 │   ├── promtail/promtail.generated.yaml       # ensure service= labels
 │   └── grafana/README.md                      # token provisioning steps
 ├── install-report.json         # discovery + decisions (secrets redacted)
-└── APPLY.md                    # ordered apply instructions for your stack
+└── APPLY.md                    # ordered apply + eval instructions
 ```
 
-Alert rules are **only** the alerts that intersect the shipped runbook corpus
-(so the agent can actually diagnose them). They are not a full replacement for
-your existing Prometheus rules—merge the `diagnostic-agent.generated` group.
+| Preset | Workspace profile seeding |
+|---|---|
+| `generic-prometheus` | Thin `extends:` stubs + starter 3-tier `service_map.yaml` |
+| `spring-micrometer` | Copied from `examples/spring-modular-monolith/` (service map, logs filters, tenant redaction, prompt) |
+
+Alert rules are **only** the alerts that intersect the shipped runbook catalog
+(so the agent can diagnose them). They are not a full replacement for your
+existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 
 ---
 
 ## After install
 
 1. **Review** `install-report.json` (placement, URLs, warnings) and edit
-   `agent/workspace/service_map.yaml` to match real service names.
+   `agent/workspace/service_map.yaml` only if your service names differ.
 2. **Follow** `APPLY.md`:
    - Merge Prometheus rules → `POST /-/reload` (needs `--web.enable-lifecycle`)
    - Merge Alertmanager route/receiver → reload
@@ -430,12 +439,19 @@ your existing Prometheus rules—merge the `diagnostic-agent.generated` group.
    curl -sf http://127.0.0.1:8001/health
    ```
    Or re-run with `--start`.
-4. **Validate without an LLM:**
+4. **Validate / lint / eval from this tree only** (no host monorepo `-w`):
    ```bash
    docker run --rm \
      -v "$PWD/deploy/agent/workspace:/workspace:ro" \
      ghcr.io/mskrado/diagnostic-agent:latest \
      sh -c "diag validate && diag lint"
+
+   # Blind eval (install package or pip install -e .)
+   diag eval blind -w ./deploy/agent/workspace --limit 3
+   diag eval blind -w ./deploy/agent/workspace \
+     --live-url http://127.0.0.1:8001 \
+     --loki-url http://127.0.0.1:3100 \
+     --judge
    ```
 
 ### Idempotent re-runs
