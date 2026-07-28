@@ -39,8 +39,12 @@ DEFAULT_PORTS: dict[ToolKind, int] = {
     ToolKind.NODE_EXPORTER: 9100,
     ToolKind.CADVISOR: 8080,
     ToolKind.OLLAMA: 11434,
-    ToolKind.MAILPIT: 1025,
+    # Mailpit HTTP UI / API (SMTP relay stays on MAILPIT_SMTP_PORT).
+    ToolKind.MAILPIT: 8025,
 }
+
+# Mailpit SMTP listen port (separate from the HTTP UI in DEFAULT_PORTS).
+MAILPIT_SMTP_PORT = 1025
 
 # Image name substrings -> tool kind (matched case-insensitively against image).
 IMAGE_HINTS: list[tuple[str, ToolKind]] = [
@@ -69,6 +73,7 @@ HEALTH_PATHS: dict[ToolKind, list[str]] = {
     ToolKind.TEMPO: ["/ready"],
     ToolKind.PROMTAIL: ["/ready"],
     ToolKind.OLLAMA: ["/api/tags"],
+    ToolKind.MAILPIT: ["/api/v1/info"],
 }
 
 

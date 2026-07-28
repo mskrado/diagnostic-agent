@@ -368,8 +368,11 @@ Separate from Alertmanager’s own email notifier. This is the agent’s
 | From / To | `AGENT_SMTP_FROM` / `AGENT_EMAIL_TO` | If email on | Envelope addresses |
 | Username / password / STARTTLS | `AGENT_SMTP_*` | If relay requires auth | Credentials |
 
-**Auto:** if **Mailpit** is discovered → enable SMTP to Mailpit (`:1025`) for
-dev. Non-interactive without Mailpit → email stays disabled.
+**Auto:** if **Mailpit** is discovered (HTTP UI on `:8025` and/or Docker
+container) → enable SMTP to Mailpit (`container-name:1025`, no auth / no
+STARTTLS). Interactive installs without Mailpit still default the SMTP fields
+to a Mailpit-style client (`host.docker.internal:1025`). Non-interactive
+without Mailpit → email stays disabled.
 
 ### G. Safety and packaging (always set by the installer)
 
