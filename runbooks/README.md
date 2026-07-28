@@ -5,6 +5,15 @@ Markdown corpus for RAG (`AGENT_RAG_ENABLED=true`). The agent chunks files at
 the log sample (`AGENT_RAG_TOP_K` chunks each, capped by `AGENT_RAG_MAX_CHUNKS`)
 so mixed incidents can surface postgres + redis + JVM runbooks together.
 
+---
+
+## Topics
+
+1. [Layout](#layout)
+2. [Authoring](#authoring)
+
+---
+
 ## Layout
 
 | File | Purpose |

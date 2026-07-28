@@ -4,6 +4,20 @@ This guide shows how to wire the agent into an existing stack **without
 modifying agent code**. You supply a **workspace** — configuration and content
 in your own repository — and the published agent does the rest.
 
+---
+
+## Topics
+
+1. [Choose a distribution](#1-choose-a-distribution)
+2. [Create a workspace](#2-create-a-workspace)
+3. [Wire Alertmanager](#3-wire-alertmanager)
+4. [Docker Compose snippet](#4-docker-compose-snippet)
+5. [Verify](#5-verify)
+6. [Guard the workspace in CI](#6-guard-the-workspace-in-ci)
+7. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
+
+---
+
 ## 1. Choose a distribution
 
 | Option | When to use |
@@ -36,8 +50,9 @@ infrastructure/diagnostic-agent/
 ```
 
 Larger hosts move the five profile YAMLs into a `profile/` subdirectory. Both
-layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the manifest
-reference and precedence rules.
+layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the
+**file-by-file** reference (purpose, how the agent uses each file, and how to
+configure it). The subsections below are a short integrating cheat-sheet.
 
 ```yaml
 # agent.yaml

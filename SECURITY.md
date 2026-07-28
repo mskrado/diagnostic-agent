@@ -1,5 +1,15 @@
 # Security Policy
 
+---
+
+## Topics
+
+1. [Supported versions](#supported-versions)
+2. [Reporting a vulnerability](#reporting-a-vulnerability)
+3. [Threat model notes](#threat-model-notes)
+
+---
+
 ## Supported versions
 
 Security fixes are applied to the latest released tag on `main`.

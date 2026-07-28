@@ -4,6 +4,20 @@ Measures how well the configured LLM identifies a root cause **from logs alone,
 with no runbook/RAG context and no hints**. This isolates the model's reasoning
 from the local knowledge base — the whole point of the exercise.
 
+---
+
+## Topics
+
+1. [What "blind" means here](#what-blind-means-here)
+2. [How and from where the logs are injected](#how-and-from-where-the-logs-are-injected)
+3. [Files](#files)
+4. [CLI parameters](#cli-parameters-apptoolsblind_evalpy)
+5. [Run it](#run-it)
+6. [Metrics reported](#metrics-reported)
+7. [Interpreting results](#interpreting-results)
+
+---
+
 ## What "blind" means here
 
 The live agent injects retrieved runbook text into the correlate prompt

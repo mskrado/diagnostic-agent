@@ -2,6 +2,19 @@
 
 Thanks for helping improve diagnostic-agent.
 
+---
+
+## Topics
+
+1. [SDLC (everyone follows this)](#sdlc-everyone-follows-this)
+2. [The contribution loop (preferred)](#the-contribution-loop-preferred)
+3. [Development](#development)
+4. [DCO (Developer Certificate of Origin)](#dco-developer-certificate-of-origin)
+5. [Safety invariants (do not weaken)](#safety-invariants-do-not-weaken)
+6. [Pull requests](#pull-requests)
+
+---
+
 ## SDLC (everyone follows this)
 
 Work flows **issue → `feature/<slug>-<n>` → PR into `devel` → release PR `devel`→`main` → publish**.

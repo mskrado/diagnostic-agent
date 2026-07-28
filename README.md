@@ -13,7 +13,7 @@ and content that live in *your* repository — **not** forking this codebase.
 
 ## Contents
 
-In this README:
+Topics in this README:
 
 - [Quick start — install against your stack](#quick-start--install-against-your-stack) — generate an agent + wiring bundle with `diag install`
 - [Quick start (hello-world workspace)](#quick-start-hello-world-workspace) — run the agent locally or in Docker against the bundled example

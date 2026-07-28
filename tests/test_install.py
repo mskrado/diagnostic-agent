@@ -571,6 +571,41 @@ def test_generate_idempotent_backup(tmp_path: Path):
     assert backups[0].read_text(encoding="utf-8") == "stale\n"
 
 
+def test_generate_workspace_files_include_config_guidance(tmp_path, no_llm_env, no_probe):
+    """Install stubs must carry in-file configure instructions for operators."""
+    report = _discovered_report()
+    params = collect(
+        report,
+        non_interactive=True,
+        allow_degraded=True,
+        overrides={"chat_provider": "ollama", "prometheus_url": "http://127.0.0.1:9090"},
+    )
+    package_root = Path(__file__).resolve().parent.parent
+    out = tmp_path / "out"
+    generate(output=out, report=report, params=params, package_root=package_root)
+
+    workspace = out / "agent" / "workspace"
+    service_map = (workspace / "service_map.yaml").read_text(encoding="utf-8")
+    assert "WHAT THIS FILE DOES" in service_map
+    assert "CONFIGURE" in service_map
+    assert "docs/WORKSPACE.md" in service_map
+
+    metrics = (workspace / "metrics_profile.yaml").read_text(encoding="utf-8")
+    assert "extends:" in metrics
+    assert "HOW THE AGENT USES IT" in metrics
+
+    agent_yaml = (workspace / "agent.yaml").read_text(encoding="utf-8")
+    assert "extends:" in agent_yaml
+    assert "AGENT_DEFAULT_PRESET" in agent_yaml
+
+    env_text = (out / "agent" / ".env").read_text(encoding="utf-8")
+    assert "WHAT THIS FILE DOES" in env_text
+
+    assert (workspace / "runbooks" / "README.md").is_file()
+    readme = (workspace / "runbooks" / "README.md").read_text(encoding="utf-8")
+    assert "RAG" in readme
+
+
 @patch("app.install.discover.subprocess.run")
 def test_discover_handles_docker_unavailable(mock_run: MagicMock):
     mock_run.side_effect = FileNotFoundError("docker")

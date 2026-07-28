@@ -17,6 +17,22 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 
 ---
 
+## Topics
+
+1. [Modes at a glance](#modes-at-a-glance)
+2. [Interactive mode](#interactive-mode)
+3. [Non-interactive mode](#non-interactive-mode)
+4. [CLI flags reference](#cli-flags-reference)
+5. [Parameters collected (full reference)](#parameters-collected-full-reference)
+6. [What gets generated](#what-gets-generated)
+7. [After install](#after-install)
+8. [Graceful degradation](#graceful-degradation)
+9. [Troubleshooting](#troubleshooting)
+10. [Requirements](#requirements)
+11. [Quick recipe card](#quick-recipe-card)
+
+---
+
 ## Modes at a glance
 
 | Mode | When to use | How |
@@ -396,13 +412,15 @@ without Mailpit → email stays disabled.
 │   ├── docker-compose.yml      # agent service + optional external network
 │   ├── .env                    # ALL AGENT_* (+ SDK keys) — do not commit
 │   ├── .gitignore              # ignores .env
-│   └── workspace/
+│   └── workspace/              # host integration profile (see WORKSPACE.md)
 │       ├── agent.yaml
 │       ├── metrics_profile.yaml / logs_profile.yaml / …
 │       ├── redaction.yaml
-│       ├── service_map.yaml    # EDIT ME
+│       ├── prompt_profile.yaml
+│       ├── service_map.yaml    # EDIT ME — starter topology only
 │       ├── scenarios.yaml
-│       └── runbooks/           # seeded from the catalog the agent can diagnose
+│       ├── runbooks/           # seeded from the catalog the agent can diagnose
+│       └── runbooks/README.md  # how to extend the corpus
 ├── observability/
 │   ├── prometheus/alert-rules.generated.yml   # merge into rule_files
 │   ├── alertmanager/route.generated.yml       # additive webhook receiver
@@ -411,6 +429,25 @@ without Mailpit → email stays disabled.
 ├── install-report.json         # discovery + decisions (secrets redacted)
 └── APPLY.md                    # ordered apply instructions for your stack
 ```
+
+### Bundle file guide
+
+Workspace YAMLs are documented in depth in [WORKSPACE.md](WORKSPACE.md)
+(purpose, runtime use, and how to configure each file). Headers inside the
+generated files repeat the same instructions.
+
+| Path | Role | What you do after install |
+|---|---|---|
+| `agent/.env` | Runtime settings: Prometheus/Loki/Grafana URLs, LLM provider + models, SMTP, redaction/RAG flags, image pin. Loaded by Compose via `env_file`. | Fill secrets (API keys, `AGENT_GRAFANA_TOKEN`, AWS keys if Bedrock). Keep `AGENT_DEFAULT_PRESET` aligned with `workspace/agent.yaml` `extends`. **Do not commit.** |
+| `agent/docker-compose.yml` | Runs the published image, mounts `./workspace` → `/workspace:ro`, joins the discovered Docker network when present. | `docker compose --env-file .env up -d`. Adjust published port or image pin if needed. |
+| `agent/Dockerfile` | Optional thin `FROM` wrapper around the GHCR image. | Prefer pulling the image via Compose; build only if your registry policy requires it. |
+| `agent/workspace/*` | Integration profile + runbooks the agent reads on every diagnosis. | Edit `service_map.yaml` and profile overlays to match your stack; see WORKSPACE.md. |
+| `observability/prometheus/alert-rules.generated.yml` | Alert rule group intersecting the shipped runbook catalog. | **Merge** into Prometheus `rule_files` (not a full replacement), then reload. |
+| `observability/alertmanager/route.generated.yml` | Additive route/receiver → agent webhook. | Merge into Alertmanager config and reload. |
+| `observability/promtail/promtail.generated.yaml` | Snippet reminding you to emit `service=` labels. | Align scrapes with `service_map.yaml` names. |
+| `observability/grafana/README.md` | How to mint a service-account token for annotations. | Optional; skip if annotations stay off. |
+| `install-report.json` | Discovery inventory, decisions, warnings (secrets redacted). | Review placement/URLs before applying. |
+| `APPLY.md` | Ordered apply checklist tailored to this install. | Follow top to bottom, then health-check the agent. |
 
 Alert rules are **only** the alerts that intersect the shipped runbook corpus
 (so the agent can actually diagnose them). They are not a full replacement for
