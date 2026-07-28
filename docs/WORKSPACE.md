@@ -21,22 +21,19 @@ infrastructure/diagnostic-agent/
 stubs. Full install-bundle files (`.env`, compose, observability snippets) are
 documented in [INSTALL.md](INSTALL.md#what-gets-generated).
 
-Because the manifest declares every path, commands take no path arguments:
-
-```bash
-docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
-  ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
-```
+Because the manifest declares every path, commands take no path arguments — see
+[Validate with the published image](#validate-with-the-published-image).
 
 ---
 
 ## Topics
 
-1. [Locating the workspace](#locating-the-workspace)
-2. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
-3. [Manifest (`agent.yaml`)](#manifest-agentyaml)
-4. [Flat layout](#flat-layout)
-5. [File-by-file reference](#file-by-file-reference)
+1. [Validate with the published image](#validate-with-the-published-image)
+2. [Locating the workspace](#locating-the-workspace)
+3. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
+4. [Manifest (`agent.yaml`)](#manifest-agentyaml)
+5. [Flat layout](#flat-layout)
+6. [File-by-file reference](#file-by-file-reference)
    - [`metrics_profile.yaml`](#metrics_profileyaml)
    - [`logs_profile.yaml`](#logs_profileyaml)
    - [`prompt_profile.yaml`](#prompt_profileyaml)
@@ -45,11 +42,44 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
    - [`scenarios.yaml`](#scenariosyaml)
    - [`blind_eval.yaml`](#blind_evalyaml-optional)
    - [`runbooks/`](#runbooks)
-6. [Precedence](#precedence)
-7. [Redaction is fail-closed](#redaction-is-fail-closed)
-8. [Validating in CI](#validating-in-ci)
+7. [Precedence](#precedence)
+8. [Redaction is fail-closed](#redaction-is-fail-closed)
+9. [Validating in CI](#validating-in-ci)
 
 ---
+
+## Validate with the published image
+
+Run workspace checks inside the published agent image without installing Python
+locally:
+
+```bash
+docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
+  ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
+```
+
+What each piece does:
+
+| Piece | Meaning |
+|---|---|
+| `docker run --rm` | One-shot container; removed when the command exits |
+| `-v "$PWD/…:/workspace:ro"` | Bind-mount your **host** workspace at `/workspace`, read-only |
+| `ghcr.io/mskrado/diagnostic-agent:<tag>` | Published agent image (replace `<tag>`, e.g. `latest` or `0.2.0`) |
+| `diag validate` | Checks manifest schema, profile/`extends` resolution, redaction rule count, and declared paths |
+
+The image sets `AGENT_WORKSPACE=/workspace`, so validation reads the mounted host
+config — nothing from your laptop’s Python env is required. This checks
+**configuration health**, not a live diagnosis (no Prometheus/Loki/LLM needed).
+
+**PowerShell:** prefer `${PWD}` (or an absolute path) so the mount source expands:
+
+```powershell
+docker run --rm -v "${PWD}/infrastructure/diagnostic-agent:/workspace:ro" `
+  ghcr.io/mskrado/diagnostic-agent:latest diag validate
+```
+
+After `diag install`, mount the generated workspace instead, e.g.
+`${PWD}/deploy/agent/workspace` or `${PWD}/publishi/agent/workspace`.
 
 ## Locating the workspace
 
@@ -350,10 +380,17 @@ silently disable redaction — the fail-closed guard exists for that case.
 
 ## Validating in CI
 
+Same mount pattern as above; add `diag lint` for corpus checks:
+
 ```bash
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<tag> sh -c "diag validate && diag lint"
 ```
 
-`validate` covers configuration; `lint` covers content. Neither needs LLM
-credentials or a running stack. Add `diag e2e --url` once an agent is deployed.
+| Command | Covers |
+|---|---|
+| `diag validate` | Configuration: manifest, profile resolution, redaction count, topology parse |
+| `diag lint` | Content: runbook / scenario corpus consistency |
+
+Neither needs LLM credentials or a running observability stack. Add
+`diag e2e --url` once an agent is deployed.

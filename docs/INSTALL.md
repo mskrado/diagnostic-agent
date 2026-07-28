@@ -484,6 +484,20 @@ your existing Prometheus rules—merge the `diagnostic-agent.generated` group.
      ghcr.io/mskrado/diagnostic-agent:latest \
      sh -c "diag validate && diag lint"
    ```
+   This runs the published image once, mounts your generated workspace at
+   `/workspace` (read-only), and checks config + corpus. No local `pip install`
+   or LLM is required. Piece-by-piece breakdown:
+   [WORKSPACE.md — Validate with the published image](WORKSPACE.md#validate-with-the-published-image)
+   and [Validating in CI](WORKSPACE.md#validating-in-ci).
+
+   PowerShell:
+
+   ```powershell
+   docker run --rm `
+     -v "${PWD}/deploy/agent/workspace:/workspace:ro" `
+     ghcr.io/mskrado/diagnostic-agent:latest `
+     sh -c "diag validate && diag lint"
+   ```
 
 ### Idempotent re-runs
 
