@@ -147,7 +147,7 @@ def _seed_params(
     params.webhook_url = _first(
         overrides.get("webhook_url"),
         matrix.alertmanager_to_agent_webhook,
-        "http://diagnostic-agent:8000/webhook",
+        "http://diagnostic-agent:8000/alert",
     )
     params.docker_network = matrix.shared_docker_network
     params.agent_host_port = matrix.agent_host_port
@@ -304,7 +304,7 @@ def _confirm_core_parameters(
             default=(
                 params.webhook_url
                 or matrix.alertmanager_to_agent_webhook
-                or "http://diagnostic-agent:8000/webhook"
+                or "http://diagnostic-agent:8000/alert"
             ),
             allow_empty=False,
             help_text="Must be routable from Alertmanager, not from your shell.",
@@ -385,6 +385,65 @@ def _resolve_preset(
     return "generic-prometheus"
 
 
+def _default_embed_provider(chat_provider: str) -> str:
+    """Embeddings provider for a chat provider (must not copy chat id blindly).
+
+    ``bedrock_converse`` is a chat-only LangChain id; embeddings use ``bedrock``.
+    """
+    return {
+        "bedrock_converse": "bedrock",
+        "bedrock": "bedrock",
+        "openai": "openai",
+        "google_genai": "google_genai",
+        "anthropic": "openai",
+        "ollama": "ollama",
+    }.get(chat_provider, "ollama")
+
+
+def _default_embed_model(chat_provider: str) -> str:
+    return {
+        "bedrock_converse": "amazon.titan-embed-text-v2:0",
+        "bedrock": "amazon.titan-embed-text-v2:0",
+        "openai": "text-embedding-3-small",
+        "google_genai": "text-embedding-004",
+        "anthropic": "text-embedding-3-small",
+        "ollama": "nomic-embed-text",
+    }.get(chat_provider, "nomic-embed-text")
+
+
+def _default_chat_model(chat_provider: str) -> str:
+    return {
+        "bedrock_converse": "amazon.nova-micro-v1:0",
+        "bedrock": "amazon.nova-micro-v1:0",
+        "openai": "gpt-4o-mini",
+        "google_genai": "gemini-1.5-flash",
+        "anthropic": "claude-3-5-haiku-latest",
+        "ollama": "mistral:7b-instruct",
+    }.get(chat_provider, "mistral:7b-instruct")
+
+
+def _apply_bedrock_region_kwargs(
+    params: InstallParams,
+    overrides: dict[str, Any],
+) -> None:
+    region = _first(
+        overrides.get("aws_region"),
+        os.environ.get("AWS_REGION"),
+        params.aws_region,
+        "us-east-1",
+    )
+    params.aws_region = region
+    region_kwargs = json.dumps({"region_name": region})
+    if overrides.get("chat_model_kwargs"):
+        params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
+    elif not params.chat_model_kwargs or params.chat_model_kwargs == "{}":
+        params.chat_model_kwargs = region_kwargs
+    if overrides.get("embed_model_kwargs"):
+        params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
+    elif not params.embed_model_kwargs or params.embed_model_kwargs == "{}":
+        params.embed_model_kwargs = region_kwargs
+
+
 def _seed_llm_from_environment(
     params: InstallParams,
     report: DiscoveryReport,
@@ -392,16 +451,28 @@ def _seed_llm_from_environment(
 ) -> bool:
     """Populate LLM fields from overrides / discovery / env. Return True if seeded."""
     if overrides.get("chat_provider"):
-        params.chat_provider = str(overrides["chat_provider"])
-        params.chat_model = str(overrides.get("chat_model") or params.chat_model)
-        params.embed_provider = str(
-            overrides.get("embed_provider") or params.chat_provider
+        chat = str(overrides["chat_provider"])
+        if chat == "bedrock":
+            chat = "bedrock_converse"
+        params.chat_provider = chat
+        params.chat_model = str(
+            overrides.get("chat_model") or _default_chat_model(chat)
         )
-        params.embed_model = str(overrides.get("embed_model") or params.embed_model)
-        if overrides.get("chat_model_kwargs"):
-            params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
-        if overrides.get("embed_model_kwargs"):
-            params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
+        # Do NOT copy chat_provider into embed_provider — bedrock_converse is
+        # chat-only, and the InstallParams default embed model is Ollama's.
+        params.embed_provider = str(
+            overrides.get("embed_provider") or _default_embed_provider(chat)
+        )
+        params.embed_model = str(
+            overrides.get("embed_model") or _default_embed_model(chat)
+        )
+        if chat == "bedrock_converse":
+            _apply_bedrock_region_kwargs(params, overrides)
+        else:
+            if overrides.get("chat_model_kwargs"):
+                params.chat_model_kwargs = str(overrides["chat_model_kwargs"])
+            if overrides.get("embed_model_kwargs"):
+                params.embed_model_kwargs = str(overrides["embed_model_kwargs"])
         report.decisions.append(f"LLM seed -> {params.chat_provider} (override)")
         return True
 

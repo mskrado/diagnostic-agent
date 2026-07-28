@@ -56,6 +56,19 @@ class IntegrationProfile:
     prompt: PromptProfile
     service_map_path: str | None
     runbooks_path: str | None
+    # Unparseable profile YAML files (path + reason). Empty when load succeeded.
+    # `diag validate` and agent startup treat these as hard failures so a broken
+    # overlay cannot silently fall back to preset-only config.
+    load_errors: tuple[str, ...] = ()
+
+
+class ProfileLoadError(Exception):
+    """Raised when a profile YAML file exists but cannot be parsed."""
+
+    def __init__(self, path: Path, detail: str):
+        self.path = path
+        self.detail = detail
+        super().__init__(f"Failed to load profile file {path}: {detail}")
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -66,8 +79,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
             data = yaml.safe_load(f) or {}
         return data if isinstance(data, dict) else {}
     except (OSError, yaml.YAMLError) as exc:
-        logger.error("Failed to load profile file %s: %s", path, exc)
-        return {}
+        raise ProfileLoadError(path, str(exc)) from exc
 
 
 def _merge_named_list(
@@ -163,15 +175,26 @@ def _resolve_section(
     return _deep_merge(merged, profile_data)
 
 
-def _load_profile_dir(profile_dir: Path | None) -> dict[str, dict[str, Any]]:
+def _load_profile_dir(
+    profile_dir: Path | None,
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
     if profile_dir is None or not profile_dir.is_dir():
-        return {}
+        return {}, []
     out: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
     for key, filename in _SECTION_FILES.items():
-        data = _read_yaml(profile_dir / filename)
+        path = profile_dir / filename
+        if not path.is_file():
+            continue
+        try:
+            data = _read_yaml(path)
+        except ProfileLoadError as exc:
+            logger.error("%s", exc)
+            errors.append(str(exc))
+            continue
         if data:
             out[key] = data
-    return out
+    return out, errors
 
 
 def build_profile(
@@ -196,7 +219,7 @@ def build_profile(
             root = None
             name = default_preset
 
-    file_data = _load_profile_dir(root)
+    file_data, load_errors = _load_profile_dir(root)
 
     metrics_raw = _resolve_section(
         "metrics", file_data.get("metrics") or {}, default_preset=default_preset
@@ -241,6 +264,7 @@ def build_profile(
         prompt=PromptProfile.from_dict(prompt_raw),
         service_map_path=service_map_path,
         runbooks_path=runbooks_path,
+        load_errors=tuple(load_errors),
     )
 
 

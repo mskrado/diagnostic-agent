@@ -154,7 +154,7 @@ Review
   prometheus     http://host.docker.internal:9090
   loki           http://host.docker.internal:3100
   alertmanager   http://host.docker.internal:9093
-  webhook        http://host.docker.internal:8001/webhook
+  webhook        http://host.docker.internal:8001/alert
   grafana        http://host.docker.internal:3000
   grafana token  (none)
   chat           ollama/mistral:7b-instruct
@@ -311,9 +311,9 @@ How the installer picks a default:
 
 | Agent placement | Default webhook |
 |---|---|
-| Same Docker network as the stack | `http://diagnostic-agent:8000/webhook` |
-| Standalone on the local host | `http://host.docker.internal:8001/webhook` |
-| Remote target | `http://<target-host>:8001/webhook` (confirm routability from AM) |
+| Same Docker network as the stack | `http://diagnostic-agent:8000/alert` |
+| Standalone on the local host | `http://host.docker.internal:8001/alert` |
+| Remote target | `http://<target-host>:8001/alert` (confirm routability from AM) |
 
 Host port **8001** maps to container port **8000** in the generated compose file
 (`agent_host_port`). Override with `--webhook-url` when your network topology

@@ -1,15 +1,17 @@
 FROM python:3.12-slim
 
 # No project baked in as the default profile: the agent runs on the in-package
-# preset unless a host workspace is mounted at /workspace (or AGENT_PROFILE_DIR
-# points at a bundled example under /app/examples). Presets always supply
+# preset unless a host workspace is mounted at /workspace. Presets always supply
 # redaction rules, so an unmounted /workspace degrades to preset-only behaviour
 # rather than silently disabling redaction — Docker turns a missing mount source
 # into an empty directory, and that used to shadow the profile.
+#
+# Do NOT set AGENT_PROFILE_DIR="" here. An empty string is a set value, and
+# `diag serve` must be able to fill AGENT_PROFILE_DIR from the mounted workspace
+# (see app.cli._apply_workspace_env). Compose also pins AGENT_PROFILE_DIR=/workspace.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    AGENT_PROFILE_DIR="" \
     AGENT_WORKSPACE=/workspace
 # AGENT_DEFAULT_PRESET is deliberately unset: the host workspace's agent.yaml
 # `extends:` supplies it. Baking a value here would override every host.
