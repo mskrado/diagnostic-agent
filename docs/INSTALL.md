@@ -23,7 +23,8 @@ that is collected (why it exists, required vs optional), examples, and what to
 do after generation.
 
 Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
-[INSTALL_OPERATOR.md](INSTALL_OPERATOR.md) (LLM-assisted install prompt)
+[INSTALL_OPERATOR.md](INSTALL_OPERATOR.md) (LLM-assisted install; **quality bar** —
+stubs alone are not done)
 
 ---
 
