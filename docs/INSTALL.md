@@ -489,13 +489,14 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
      ghcr.io/mskrado/diagnostic-agent:latest \
      sh -c "diag validate && diag lint"
 
-   # Blind eval (install package or pip install -e . / python -m app.cli …)
-   diag eval blind -w ./deploy/agent/workspace --limit 3
-   diag eval blind -w ./deploy/agent/workspace \
+   # Blind eval: -w is on `eval`, before `blind`
+   # (install package or pip install -e . / python -m app.cli …)
+   diag eval -w ./deploy/agent/workspace blind --limit 3
+   diag eval -w ./deploy/agent/workspace blind \
      --live-url http://127.0.0.1:8001 \
      --loki-url http://127.0.0.1:3100 \
      --limit 3
-   diag eval blind -w ./deploy/agent/workspace \
+   diag eval -w ./deploy/agent/workspace blind \
      --live-url http://127.0.0.1:8001 \
      --loki-url http://127.0.0.1:3100 \
      --judge

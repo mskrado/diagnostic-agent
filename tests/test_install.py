@@ -506,7 +506,9 @@ def test_generate_spring_seeds_modular_monolith_profile(tmp_path: Path):
     assert (workspace / "blind_eval.yaml").is_file()
     assert verify(out) == []
     apply = (out / "APPLY.md").read_text(encoding="utf-8")
-    assert "diag eval blind -w ./agent/workspace" in apply
+    assert "diag eval -w ./agent/workspace blind" in apply
+    assert "python -m app.cli eval -w ./agent/workspace blind" in apply
+    assert "diag eval blind -w" not in apply
     assert "--live-url http://127.0.0.1:8001" in apply
     assert "--loki-url http://127.0.0.1:3100" in apply
     assert "--limit 3" in apply
