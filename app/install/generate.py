@@ -747,7 +747,25 @@ Full reference: docs/INSTALL.md (Grafana annotations section).
 """
 
 
+def _host_loki_url_for_docs(params: InstallParams) -> str:
+    """Host-reachable Loki URL for APPLY.md eval commands (not container DNS)."""
+    raw = (params.loki_url or "").strip()
+    if not raw:
+        return "http://127.0.0.1:3100"
+    # Container DNS / docker network names are not reachable from the host CLI.
+    lowered = raw.lower()
+    if "://" in lowered:
+        host = lowered.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
+        if host not in {"127.0.0.1", "localhost", "0.0.0.0"} and "." not in host:
+            # bare service name like loki / publishi-loki → published host port
+            return "http://127.0.0.1:3100"
+    return raw.rstrip("/")
+
+
 def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
+    port = params.agent_host_port
+    loki_host = _host_loki_url_for_docs(params)
+    live_url = f"http://127.0.0.1:{port}"
     lines = [
         "# Apply instructions",
         "",
@@ -758,8 +776,7 @@ def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
         "```bash",
         "cd agent",
         "docker compose --env-file .env up -d",
-        "# health: curl -sf http://127.0.0.1:"
-        f"{params.agent_host_port}/health",
+        f"# health: curl -sf {live_url}/health",
         "```",
         "",
         "Validate the workspace without an LLM:",
@@ -769,19 +786,62 @@ def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
         f"{params.agent_image} sh -c 'diag validate && diag lint'",
         "```",
         "",
-        "### Blind eval (self-contained — no host monorepo)",
+        "## Testing (health, alert, blind eval)",
         "",
-        "The workspace includes `blind_eval.yaml`. From the install output root:",
+        "Run these from the **install output root** (the directory that contains",
+        "`agent/` and `APPLY.md`). On Windows, if `diag` is not on PATH, use",
+        "`python -m app.cli` from a checkout of this repo instead of `diag`.",
+        "",
+        "### Health",
         "",
         "```bash",
-        "# Offline (LLM creds on the host):",
-        "diag eval blind -w ./agent/workspace --limit 3",
-        "",
-        "# Live against the agent you just started:",
-        "diag eval blind -w ./agent/workspace \\",
-        f"  --live-url http://127.0.0.1:{params.agent_host_port} \\",
-        "  --loki-url http://127.0.0.1:3100",
+        f"curl -sf {live_url}/health",
+        "# expect: status=ok, preset matches agent.yaml extends, redaction_rules > 0",
         "```",
+        "",
+        "### Manual test alert",
+        "",
+        "```bash",
+        f"curl -X POST {live_url}/alert -H 'Content-Type: application/json' \\",
+        "  -d '{\"alerts\":[{\"status\":\"firing\",\"labels\":"
+        "{\"alertname\":\"HighErrorRate\",\"service\":\"platform-service\","
+        "\"severity\":\"warning\"},\"annotations\":{\"summary\":\"test\"}}]}'",
+        "```",
+        "",
+        "Adjust `alertname` / `service` to labels from your live Alertmanager.",
+        "Confirm the response evidence uses **this** stack's PromQL / LogQL /",
+        "container hostnames (not empty queries).",
+        "",
+        "### Blind eval (self-contained — no host monorepo)",
+        "",
+        "The workspace includes `blind_eval.yaml`. Results default to",
+        "`agent/workspace/eval-results/`. See `eval/README.md` for scoring details.",
+        "",
+        "```bash",
+        "# Offline smoke (LLM creds on the host; no agent/Loki required):",
+        "diag eval blind -w ./agent/workspace --limit 3",
+        "#   or: python -m app.cli eval blind -w ./agent/workspace --limit 3",
+        "",
+        "# Live smoke — push case logs to Loki, POST /alert on this agent:",
+        "diag eval blind -w ./agent/workspace \\",
+        f"  --live-url {live_url} \\",
+        f"  --loki-url {loki_host} \\",
+        "  --limit 3",
+        "",
+        "# Single case:",
+        "diag eval blind -w ./agent/workspace \\",
+        f"  --live-url {live_url} --loki-url {loki_host} \\",
+        "  --only redis-connection",
+        "",
+        "# Full dataset + LLM judge:",
+        "diag eval blind -w ./agent/workspace \\",
+        f"  --live-url {live_url} --loki-url {loki_host} \\",
+        "  --judge",
+        "```",
+        "",
+        "Prereqs for **live** mode: agent healthy on the port above, Loki",
+        f"reachable at `{loki_host}`, and (for offline) chat/embed credentials",
+        "on the host matching `agent/.env`.",
         "",
         "## 2. Prometheus alert rules",
         "",
