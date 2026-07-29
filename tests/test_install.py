@@ -516,6 +516,10 @@ def test_generate_spring_seeds_modular_monolith_profile(tmp_path: Path):
     assert "/alert" in apply
     assert "POST" in apply
     assert "## Testing" in apply
+    assert "**bash**" in apply
+    assert "**PowerShell**" in apply or "```powershell" in apply
+    assert "curl.exe" in apply
+    assert "Set-Content" in apply
 
 
 def test_verify_rejects_incomplete_bundle_without_allow_degraded(tmp_path: Path):

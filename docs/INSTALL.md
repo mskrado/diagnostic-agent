@@ -449,7 +449,7 @@ generated files repeat the same instructions.
 | `observability/promtail/promtail.generated.yaml` | Snippet reminding you to emit `service=` labels. | Align scrapes with `service_map.yaml` names. |
 | `observability/grafana/README.md` | How to mint a service-account token for annotations. | Optional; skip if annotations stay off. |
 | `install-report.json` | Discovery inventory, decisions, warnings (secrets redacted). | Review placement/URLs before applying. |
-| `APPLY.md` | Ordered apply checklist + **Testing** section (health, `POST /alert`, offline/live blind eval with `--limit` / `--only` / `--judge`). | Follow top to bottom; run the Testing commands before declaring the install done. |
+| `APPLY.md` | Ordered apply checklist + **Testing** section with **bash and PowerShell** examples (health, `POST /alert`, offline/live blind eval with `--limit` / `--only` / `--judge`). | Follow top to bottom; run the Testing commands before declaring the install done. |
 
 Alert rules are **only** the alerts that intersect the shipped runbook corpus
 (so the agent can actually diagnose them). They are not a full replacement for
