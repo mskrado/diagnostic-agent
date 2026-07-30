@@ -119,7 +119,7 @@ feature/sdlc-guide-9 ───────────────────�
 2. Open a **draft PR early** with **base `devel`**.
 3. CI (`ci.yml` + `dco.yml`) must be green.
 4. Squash-merge to `devel` and delete the branch.
-5. For a published release: open a **Release Checklist** issue, then PR **`devel` → `main`**.
+5. For a published release: open a **Release Checklist** issue and PR **`devel` → `main`** with a feature-PR inventory (prefer `scripts/open-release-pr.ps1`).
 6. **After** merge to `main`: run Release explicitly (see [§7](#7-release)). Merge alone does **not** publish.
 
 ---
@@ -221,14 +221,30 @@ The resolved version is stamped into `pyproject.toml` before build (not
 committed), so the image, the wheel, `diag version`, and the audit record's
 `agent_version` cannot disagree with the tag. Publishes a multi-arch image to
 GHCR tagged `X.Y.Z`, `sha-<short>`, and `latest`, uploads the wheel to PyPI when
-`PYPI_API_TOKEN` is configured, and opens a GitHub Release with generated notes.
+`PYPI_API_TOKEN` is configured, and opens a GitHub Release whose **What's Changed**
+list is built from PRs merged into `devel` (see below) — not from thin `devel` →
+`main` PRs.
 
 ---
 
 ## 7. Release
 
-1. Open a **Release Checklist** issue.
-2. Open PR **`devel` → `main`** referencing that issue; merge when CI is green.
+1. Open a **Release Checklist** issue **and** a `devel` → `main` PR whose body
+   inventories feature PRs (prefer the helper script so the PR is never titled
+   bare `Devel`):
+
+```bash
+# Preferred: generate inventory + checklist + draft PR
+pwsh ./scripts/open-release-pr.ps1
+
+# Or manually:
+bash scripts/generate-release-notes.sh --out release-notes.md
+gh pr create --base main --head devel \
+  --title "Release: $(date -u +%Y-%m-%d) (devel → main)" \
+  --body-file release-notes.md
+```
+
+2. Merge the release PR when CI is green.
 3. Publish (merge does **not** publish):
 
 ```bash
@@ -241,6 +257,15 @@ git checkout main && git pull
 git tag v1.2.0
 git push origin v1.2.0
 ```
+
+**Release notes** are generated from **PRs merged into `devel`** since the
+previous release tag by [`scripts/generate-release-notes.sh`](../scripts/generate-release-notes.sh)
+(categories/excludes aligned with [`.github/release.yml`](../.github/release.yml)).
+`release.yml` prepends an artifacts footer and sets `generate_release_notes: false`
+so GitHub does not append a second list that only saw thin `devel` → `main` PRs.
+The same inventory should appear in the **Release PR body**. PRs into `devel`
+should carry a `type:*` label so categories are not all “Other Changes”
+(`ci.yml` posts an advisory comment when missing).
 
 Bump rules: **MAJOR** = breaking workspace/profile/CLI contract · **MINOR** = backward-compatible feature · **PATCH** = fix/docs/corpus.
 

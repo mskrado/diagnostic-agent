@@ -11,11 +11,13 @@ labels: ["release"]
 
 ## Scope
 
-- Closes #
-- Closes #
+<!-- Paste output of: .\scripts\generate-release-notes.ps1  (PRs merged into devel since last tag) -->
+<!-- Or use: .\scripts\open-release-pr.ps1 to create this issue + the PR together -->
 
 ## Pre-merge checklist
 
+- [ ] Release notes inventory generated (`scripts/generate-release-notes.ps1` / `.sh`) and pasted above
+- [ ] PR title is `Release: vX.Y.Z (devel → main)` — **not** bare `Devel`
 - [ ] All in-scope child issues closed or explicitly deferred
 - [ ] Breaking workspace / CLI / profile contract changes documented in `docs/`
 - [ ] `.env.example` updated if new `AGENT_*` settings
