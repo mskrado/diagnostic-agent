@@ -449,7 +449,7 @@ generated files repeat the same instructions.
 | `observability/promtail/promtail.generated.yaml` | Snippet reminding you to emit `service=` labels. | Align scrapes with `service_map.yaml` names. |
 | `observability/grafana/README.md` | How to mint a service-account token for annotations. | Optional; skip if annotations stay off. |
 | `install-report.json` | Discovery inventory, decisions, warnings (secrets redacted). | Review placement/URLs before applying. |
-| `APPLY.md` | Ordered apply checklist tailored to this install. | Follow top to bottom, then health-check the agent. |
+| `APPLY.md` | Ordered apply checklist + **Testing** section with **bash and PowerShell** examples (health, `POST /alert`, offline/live blind eval with `--limit` / `--only` / `--judge`). | Follow top to bottom; run the Testing commands before declaring the install done. |
 
 Alert rules are **only** the alerts that intersect the shipped runbook corpus
 (so the agent can actually diagnose them). They are not a full replacement for
@@ -469,7 +469,8 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 
 1. **Review** `install-report.json` (placement, URLs, warnings) and edit
    `agent/workspace/service_map.yaml` only if your service names differ.
-2. **Follow** `APPLY.md`:
+2. **Follow** `APPLY.md` (includes a **Testing** section with health, `POST /alert`,
+   and offline/live blind-eval commands pinned to this install's host port):
    - Merge Prometheus rules → `POST /-/reload` (needs `--web.enable-lifecycle`)
    - Merge Alertmanager route/receiver → reload
    - Align Promtail/Loki `service=` labels with the service map
@@ -480,16 +481,22 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
    curl -sf http://127.0.0.1:8001/health
    ```
    Or re-run with `--start`.
-4. **Validate / lint / eval from this tree only** (no host monorepo `-w`):
+4. **Validate / lint / eval** — copy-paste from `APPLY.md` § Testing, or:
+
    ```bash
    docker run --rm \
      -v "$PWD/deploy/agent/workspace:/workspace:ro" \
      ghcr.io/mskrado/diagnostic-agent:latest \
      sh -c "diag validate && diag lint"
 
-   # Blind eval (install package or pip install -e .)
-   diag eval blind -w ./deploy/agent/workspace --limit 3
-   diag eval blind -w ./deploy/agent/workspace \
+   # Blind eval: -w is on `eval`, before `blind`
+   # (install package or pip install -e . / python -m app.cli …)
+   diag eval -w ./deploy/agent/workspace blind --limit 3
+   diag eval -w ./deploy/agent/workspace blind \
+     --live-url http://127.0.0.1:8001 \
+     --loki-url http://127.0.0.1:3100 \
+     --limit 3
+   diag eval -w ./deploy/agent/workspace blind \
      --live-url http://127.0.0.1:8001 \
      --loki-url http://127.0.0.1:3100 \
      --judge

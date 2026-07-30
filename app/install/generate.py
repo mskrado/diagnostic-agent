@@ -107,7 +107,7 @@ def generate(
     else:
         plan.append((workspace / "runbooks" / "README.md", _runbooks_readme()))
 
-    # Blind eval dataset — install output is enough for `diag eval blind -w …`.
+    # Blind eval dataset — install output is enough for `diag eval -w … blind`.
     blind_src = package_root / "eval" / "blind_eval_dataset.yaml"
     if blind_src.is_file():
         plan.append(
@@ -747,7 +747,144 @@ Full reference: docs/INSTALL.md (Grafana annotations section).
 """
 
 
+def _host_loki_url_for_docs(params: InstallParams) -> str:
+    """Host-reachable Loki URL for APPLY.md eval commands (not container DNS)."""
+    raw = (params.loki_url or "").strip()
+    if not raw:
+        return "http://127.0.0.1:3100"
+    # Container DNS / docker network names are not reachable from the host CLI.
+    lowered = raw.lower()
+    if "://" in lowered:
+        host = lowered.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
+        if host not in {"127.0.0.1", "localhost", "0.0.0.0"} and "." not in host:
+            # bare service name like loki / publishi-loki → published host port
+            return "http://127.0.0.1:3100"
+    return raw.rstrip("/")
+
+
+def _testing_section_lines(params: InstallParams) -> list[str]:
+    """Unix (bash) + Windows PowerShell copy-paste examples for APPLY.md."""
+    port = params.agent_host_port
+    loki_host = _host_loki_url_for_docs(params)
+    live_url = f"http://127.0.0.1:{port}"
+    alert_json = (
+        '{"alerts":[{"status":"firing","labels":'
+        '{"alertname":"HighErrorRate","service":"platform-service",'
+        '"severity":"warning"},"annotations":{"summary":"test"}}]}'
+    )
+    return [
+        "## Testing (health, alert, blind eval)",
+        "",
+        "Run these from the **install output root** (the directory that contains",
+        "`agent/` and `APPLY.md`). Examples are shown for **Unix/macOS (bash)** and",
+        "**Windows PowerShell**. If `diag` is not on PATH, use `python -m app.cli`",
+        "from a checkout of this repo (common on Windows).",
+        "",
+        "### Health",
+        "",
+        "**bash**",
+        "",
+        "```bash",
+        f"curl -sf {live_url}/health",
+        "# expect: status=ok, preset matches agent.yaml extends, redaction_rules > 0",
+        "```",
+        "",
+        "**PowerShell** (use `curl.exe` — `curl` is an alias for `Invoke-WebRequest`)",
+        "",
+        "```powershell",
+        f"curl.exe -s {live_url}/health",
+        "# expect: status=ok, preset matches agent.yaml extends, redaction_rules > 0",
+        "```",
+        "",
+        "### Manual test alert",
+        "",
+        "Adjust `alertname` / `service` to labels from your live Alertmanager.",
+        "Confirm the response evidence uses **this** stack's PromQL / LogQL /",
+        "container hostnames (not empty queries).",
+        "",
+        "**bash**",
+        "",
+        "```bash",
+        f"curl -s -X POST {live_url}/alert -H 'Content-Type: application/json' \\",
+        f"  -d '{alert_json}'",
+        "```",
+        "",
+        "**PowerShell** (write JSON to a temp file to avoid quoting issues)",
+        "",
+        "```powershell",
+        f"$alert = '{alert_json}'",
+        'Set-Content -Path "$env:TEMP\\diag-alert.json" -Value $alert -NoNewline -Encoding ascii',
+        f'curl.exe -s -X POST {live_url}/alert -H "Content-Type: application/json" '
+        '--data-binary "@$env:TEMP\\diag-alert.json"',
+        "```",
+        "",
+        "### Blind eval (self-contained — no host monorepo)",
+        "",
+        "The workspace includes `blind_eval.yaml`. Results default to",
+        "`agent/workspace/eval-results/`. See `eval/README.md` for scoring details.",
+        "",
+        "**bash**",
+        "",
+        "```bash",
+        "# Offline smoke (LLM creds on the host; no agent/Loki required):",
+        "diag eval -w ./agent/workspace blind --limit 3",
+        "#   or: python -m app.cli eval -w ./agent/workspace blind --limit 3",
+        "",
+        "# Live smoke — push case logs to Loki, POST /alert on this agent:",
+        "diag eval -w ./agent/workspace blind \\",
+        f"  --live-url {live_url} \\",
+        f"  --loki-url {loki_host} \\",
+        "  --limit 3",
+        "",
+        "# Single case:",
+        "diag eval -w ./agent/workspace blind \\",
+        f"  --live-url {live_url} --loki-url {loki_host} \\",
+        "  --only redis-connection",
+        "",
+        "# Full dataset + LLM judge:",
+        "diag eval -w ./agent/workspace blind \\",
+        f"  --live-url {live_url} --loki-url {loki_host} \\",
+        "  --judge",
+        "```",
+        "",
+        "**PowerShell** (backtick `` ` `` continues the line)",
+        "",
+        "```powershell",
+        "# Offline smoke:",
+        "python -m app.cli eval -w ./agent/workspace blind --limit 3",
+        "",
+        "# Live smoke:",
+        "python -m app.cli eval -w ./agent/workspace blind `",
+        f"  --live-url {live_url} `",
+        f"  --loki-url {loki_host} `",
+        "  --limit 3",
+        "",
+        "# Single case:",
+        "python -m app.cli eval -w ./agent/workspace blind `",
+        f"  --live-url {live_url} --loki-url {loki_host} `",
+        "  --only redis-connection",
+        "",
+        "# Full dataset + LLM judge:",
+        "python -m app.cli eval -w ./agent/workspace blind `",
+        f"  --live-url {live_url} --loki-url {loki_host} `",
+        "  --judge",
+        "```",
+        "",
+        "Note: `-w` / `--workspace` is an argument of `diag eval`, **before**",
+        "`blind`. Flags after `blind` (`--live-url`, `--limit`, …) go to the",
+        "evaluator. From a monorepo checkout root, point `-w` at the install",
+        "bundle path (e.g. `./deploy/<name>/agent/workspace`).",
+        "",
+        "Prereqs for **live** mode: agent healthy on the port above, Loki",
+        f"reachable at `{loki_host}`, and (for offline) chat/embed credentials",
+        "on the host matching `agent/.env`.",
+        "",
+    ]
+
+
 def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
+    port = params.agent_host_port
+    live_url = f"http://127.0.0.1:{port}"
     lines = [
         "# Apply instructions",
         "",
@@ -758,31 +895,32 @@ def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
         "```bash",
         "cd agent",
         "docker compose --env-file .env up -d",
-        "# health: curl -sf http://127.0.0.1:"
-        f"{params.agent_host_port}/health",
+        f"# health: curl -sf {live_url}/health",
+        "```",
+        "",
+        "```powershell",
+        "cd agent",
+        "docker compose --env-file .env up -d",
+        f"# health: curl.exe -s {live_url}/health",
         "```",
         "",
         "Validate the workspace without an LLM:",
         "",
+        "**bash**",
+        "",
         "```bash",
-        f"docker run --rm -v \"$PWD/agent/workspace:/workspace:ro\" "
+        'docker run --rm -v "$PWD/agent/workspace:/workspace:ro" '
         f"{params.agent_image} sh -c 'diag validate && diag lint'",
         "```",
         "",
-        "### Blind eval (self-contained — no host monorepo)",
+        "**PowerShell**",
         "",
-        "The workspace includes `blind_eval.yaml`. From the install output root:",
-        "",
-        "```bash",
-        "# Offline (LLM creds on the host):",
-        "diag eval blind -w ./agent/workspace --limit 3",
-        "",
-        "# Live against the agent you just started:",
-        "diag eval blind -w ./agent/workspace \\",
-        f"  --live-url http://127.0.0.1:{params.agent_host_port} \\",
-        "  --loki-url http://127.0.0.1:3100",
+        "```powershell",
+        'docker run --rm -v "${PWD}/agent/workspace:/workspace:ro" '
+        f"{params.agent_image} sh -c 'diag validate && diag lint'",
         "```",
         "",
+        *_testing_section_lines(params),
         "## 2. Prometheus alert rules",
         "",
         "Copy `observability/prometheus/alert-rules.generated.yml` into your",
@@ -791,6 +929,10 @@ def _apply_md(params: InstallParams, report: DiscoveryReport) -> str:
         "",
         "```bash",
         "curl -X POST http://<prometheus>/-/reload",
+        "```",
+        "",
+        "```powershell",
+        "curl.exe -X POST http://<prometheus>/-/reload",
         "```",
         "",
     ]
