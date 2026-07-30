@@ -1,0 +1,53 @@
+# Configuration for release-note categories used by scripts/generate-release-notes.sh
+# (and historically by GitHub's generate_release_notes UI button).
+#
+# diagnostic-agent release notes are built from PRs merged into **devel** since
+# the previous release tag — not from thin devel→main "Devel" PRs on main.
+# Keep category/exclude lists in sync with scripts/generate-release-notes.sh|.ps1.
+#
+# Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - duplicate
+      - invalid
+      - wontfix
+    authors:
+      - dependabot
+      - dependabot[bot]
+      - github-actions
+      - github-actions[bot]
+  categories:
+    - title: "Breaking Changes"
+      labels:
+        - breaking-change
+        - type:breaking
+    - title: "Features"
+      labels:
+        - type:feature
+        - feature
+        - enhancement
+    - title: "Bug Fixes"
+      labels:
+        - type:bug
+        - bug
+        - fix
+    - title: "Tech Debt & Refactoring"
+      labels:
+        - type:tech-debt
+        - refactor
+    - title: "Documentation"
+      labels:
+        - type:docs
+        - documentation
+    - title: "Install & CI"
+      labels:
+        - area:ci
+        - area:install
+        - ci
+        - infra
+    - title: "Other Changes"
+      labels:
+        - "*"

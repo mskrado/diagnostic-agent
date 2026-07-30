@@ -58,9 +58,12 @@ jobs:
           BUMP: ${{ inputs.bump || 'patch' }}
         run: |
           set -euo pipefail
+          PREV_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             CREATE_TAG=false
+            # Previous tag = latest v* before this one (exclude the tag being released).
+            PREV_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0 --exclude "v${VERSION}" 2>/dev/null || echo "$PREV_TAG")
           else
             if [ "$GITHUB_REF_NAME" != "main" ]; then
               echo "::error::Releases publish from main only (got '$GITHUB_REF_NAME'). Merge devel -> main first."
@@ -80,7 +83,8 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "create_tag=$CREATE_TAG" >> "$GITHUB_OUTPUT"
-          echo "::notice::Release version $VERSION (create_tag=$CREATE_TAG)"
+          echo "previous_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice::Release version $VERSION (create_tag=$CREATE_TAG, previous_tag=$PREV_TAG)"
 
       - name: Stamp version into the package
         env:
@@ -151,9 +155,43 @@ jobs:
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
           git push origin "v${VERSION}"
 
+      # Inventory comes from PRs merged into devel since the previous tag
+      # (scripts/generate-release-notes.sh), not GitHub's default-branch-only
+      # generate_release_notes — that only saw thin "Devel" release PRs.
+      - name: Compose release body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PREVIOUS_TAG: ${{ steps.ver.outputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/generate-release-notes.sh
+          {
+            echo "## Artifacts"
+            echo ""
+            echo "- **GHCR:** \`ghcr.io/${{ github.repository }}:${VERSION}\` (+ \`sha-${GITHUB_SHA::7}\`, \`latest\`)"
+            echo "- **PyPI:** wheel published when \`PYPI_API_TOKEN\` is configured"
+            echo ""
+            echo "---"
+            echo ""
+          } > RELEASE_BODY.md
+
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            bash scripts/generate-release-notes.sh \
+              --since-tag "${PREVIOUS_TAG}" \
+              --current-tag "v${VERSION}" \
+              --out /tmp/whats-changed.md
+            cat /tmp/whats-changed.md >> RELEASE_BODY.md
+          else
+            echo "## What's Changed" >> RELEASE_BODY.md
+            echo "" >> RELEASE_BODY.md
+            echo "_First release — no previous tag for comparison._" >> RELEASE_BODY.md
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: Release v${{ steps.ver.outputs.version }}
-          generate_release_notes: true
+          body_path: RELEASE_BODY.md
+          generate_release_notes: false

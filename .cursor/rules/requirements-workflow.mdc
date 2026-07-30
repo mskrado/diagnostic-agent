@@ -68,7 +68,8 @@ gh workflow run release.yml --ref main -f bump=patch   # patch|minor|major
 ```bash
 gh pr create --base main --head devel \
   --title "Release: <version> (devel → main)" \
-  --body "Release checklist: #<release-issue>"
+  --body-file release-notes.md
 ```
+# Prefer: .\scripts\open-release-pr.ps1  or  bash scripts/generate-release-notes.sh --out release-notes.md
 
 Host workspace / image-pin changes belong in the **host** repository (e.g. publishi.ai), not as a re-vendor of this agent.

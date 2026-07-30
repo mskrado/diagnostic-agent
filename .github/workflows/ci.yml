@@ -9,6 +9,59 @@ permissions:
   contents: read
 
 jobs:
+  # Soft label hygiene (devel PRs). Release notes group by type:*/area:* labels;
+  # missing labels dump everything into "Other Changes". Advisory only.
+  label-hygiene:
+    name: Release-label hygiene
+    if: github.event_name == 'pull_request' && (github.base_ref == 'devel' || github.base_ref == 'develop')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check for type:* (or ignore-for-release)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = (context.payload.pull_request.labels || []).map(l => l.name);
+            const ok = labels.some(n =>
+              n === 'ignore-for-release' ||
+              n.startsWith('type:') ||
+              n === 'release'
+            );
+            const marker = '<!-- release-label-hygiene -->';
+            const body = [
+              marker,
+              '## Release-label hygiene',
+              '',
+              ok
+                ? '✅ This PR has a `type:*` / `ignore-for-release` / `release` label — release notes can categorize it.'
+                : [
+                    '⚠️ **Missing release category label.**',
+                    '',
+                    'PRs merged into `devel` should carry at least one of:',
+                    '- `type:feature` · `type:bug` · `type:tech-debt` · `type:docs`',
+                    '- or `ignore-for-release` (changelog / chore noise)',
+                    '',
+                    'Without a label, `scripts/generate-release-notes.sh` lists the PR under **Other Changes**.',
+                    'This check is advisory and does not fail the PR.',
+                  ].join('\n'),
+              '',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.data.find(c => c.user.type === 'Bot' && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else if (!ok) {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+            if (!ok) {
+              core.notice('PR is missing a type:* / ignore-for-release label (advisory).');
+            }
+
   test:
     runs-on: ubuntu-latest
     steps:
