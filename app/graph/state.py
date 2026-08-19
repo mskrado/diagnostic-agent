@@ -9,6 +9,7 @@ class DiagnosticState(TypedDict, total=False):
     service: str          # resolved service name (e.g. platform-service)
     alert_type: str       # alertname (e.g. HighErrorRate)
     severity: str
+    severity_normalized: str
     raw_labels: dict
     module_hint: str      # logical module guessed from the alert, if any
 
@@ -28,6 +29,7 @@ class DiagnosticState(TypedDict, total=False):
     llm_system_prompt: str
     llm_user_prompt: str
     llm_token_usage: dict  # input/output/total when provider reports them
+    route: str             # report | escalate | execute
 
     # --- report ---
     report: dict          # final structured report

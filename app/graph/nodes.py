@@ -24,6 +24,7 @@ from ..llm_usage import extract_token_usage
 from ..profile import get_profile
 from ..rag.store import RagStore
 from .prompts import build_system_prompt
+from .routing import normalize_severity, should_route
 from .state import DiagnosticState
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,9 @@ class DiagnosticNodes:
             "service": service,
             "alert_type": state.get("alert_type") or labels.get("alertname", "unknown"),
             "severity": state.get("severity") or labels.get("severity", "unknown"),
+            "severity_normalized": normalize_severity(
+                state.get("severity") or labels.get("severity")
+            ),
             "module_hint": module_hint,
         }
 
@@ -254,15 +258,19 @@ class DiagnosticNodes:
             "llm_system_prompt": system_prompt,
             "llm_user_prompt": user_content,
             "llm_token_usage": token_usage,
+            "route": state.get("route", "report"),
         }
 
     # ---- report --------------------------------------------------------
     def report(self, state: DiagnosticState) -> DiagnosticState:
         rag_ctx = state.get("rag_context") or ""
+        route = should_route(state)
         report = {
             "service": state.get("service"),
             "alert_type": state.get("alert_type"),
             "severity": state.get("severity"),
+            "severity_normalized": state.get("severity_normalized"),
+            "route_decision": route,
             "module": state.get("module_hint") or None,
             "dependencies_checked": state.get("dependencies", []),
             "blast_radius": state.get("blast_radius", []),
@@ -287,4 +295,4 @@ class DiagnosticNodes:
                 **settings.model_snapshot(),
             },
         }
-        return {**state, "report": report}
+        return {**state, "route": route, "report": report}
