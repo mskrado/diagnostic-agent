@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = False
     smtp_timeout: float = 15.0
+    # --- Execution (Track B; default OFF, opt-in per host) ---
+    # Master switch. When false, the sandbox refuses to run (defense in depth;
+    # the graph branch is also gated in #52).
+    exec_enabled: bool = False
+    # Path to execution_profile.yaml. Empty -> resolve from the active profile dir.
+    exec_profile_path: str = ""
 
     # --- Dependency map ---
     # Empty → resolve from profile service_map.yaml then package-root default.
@@ -110,6 +116,14 @@ class Settings(BaseSettings):
         if profile.runbooks_path:
             return profile.runbooks_path
         return str(_BASE_DIR / "runbooks")
+
+    def resolved_exec_profile_path(self) -> str:
+        """Path to execution_profile.yaml, or "" when the profile has none."""
+        if self.exec_profile_path:
+            return self.exec_profile_path
+        from .profile import get_profile
+
+        return getattr(get_profile(), "execution_profile_path", "") or ""
 
     def model_snapshot(self) -> dict[str, str]:
         """Chat + embed providers/models for audit / eval JSON reference."""

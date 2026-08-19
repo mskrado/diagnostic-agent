@@ -1,0 +1,25 @@
+version: 1
+image: "ghcr.io/mskrado/diagnostic-agent-sandbox:1"
+actions:
+  - id: clear-cdn-cache
+    description: "Purge the CDN edge cache for the affected service"
+    argv: ["cache-purge", "--service", "{service}", "--scope", "edge"]
+    params:
+      service:
+        type: enum
+        from: "incident.service"
+        values: ["web-gateway", "media-service"]
+    scope:
+      services: ["web-gateway", "media-service"]
+    timeout_s: 60
+  - id: restart-worker-pool
+    description: "Rolling restart of the stateless worker pool"
+    argv: ["scale", "restart", "--pool", "{pool}", "--rolling"]
+    params:
+      pool:
+        type: enum
+        values: ["ingest-workers", "render-workers"]
+    destructive: true
+    scope:
+      services: ["worker-pool"]
+    timeout_s: 180
