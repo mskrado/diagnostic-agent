@@ -4,6 +4,7 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from .nodes import DiagnosticNodes
+from .routing import should_route
 from .state import DiagnosticState
 
 
@@ -20,5 +21,15 @@ def build_diagnostic_graph(nodes: DiagnosticNodes):
     graph.add_edge("retrieve", "rag_lookup")
     graph.add_edge("rag_lookup", "correlate")
     graph.add_edge("correlate", "report")
-    graph.add_edge("report", END)
+    graph.add_conditional_edges(
+        "report",
+        should_route,
+        {
+            # Later issues attach real nodes to these branches. For #44 we keep
+            # today's behavior (end the run) while recording the decision.
+            "report": END,
+            "escalate": END,
+            "execute": END,
+        },
+    )
     return graph.compile()

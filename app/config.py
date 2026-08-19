@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # --- Delivery ---
     audit_log_dir: str = str(_BASE_DIR / "audit")
     grafana_annotations_enabled: bool = True
+    # Explicit routing is opt-in so hosts keep today's linear, read-only flow
+    # until they deliberately enable the new severity gate / route recording.
+    routing_enabled: bool = False
 
     # SMTP diagnostic email (separate from Alertmanager alert email).
     email_enabled: bool = True
