@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = False
     smtp_timeout: float = 15.0
+    # Slack reasoning-trace delivery. Default OFF; empty webhook also disables.
+    slack_enabled: bool = False
+    slack_webhook_url: str = ""
+    slack_channel: str = ""
+    slack_username: str = "diagnostic-agent"
+    slack_timeout: float = 10.0
 
     # --- Dependency map ---
     # Empty → resolve from profile service_map.yaml then package-root default.

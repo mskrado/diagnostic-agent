@@ -16,6 +16,7 @@ from .delivery.annotation import deliver_annotation
 from .delivery.audit import write_audit_record
 from .delivery.email import deliver_email
 from .delivery.redact import active_rule_names
+from .delivery.slack import deliver_slack
 from .dependency_map import get_dependency_map
 from .graph.build import build_diagnostic_graph
 from .graph.nodes import DiagnosticNodes
@@ -69,13 +70,14 @@ class DiagnosticAgent:
         )
         self.graph = build_diagnostic_graph(self.nodes)
         logger.info(
-            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s, "
+            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s, slack=%s, "
             "redaction=%d rules)",
             settings.chat_provider,
             settings.chat_model,
             self.rag.available,
             self.grafana.enabled,
             settings.email_enabled,
+            settings.slack_enabled,
             len(self.redaction_rules),
         )
 
@@ -94,4 +96,5 @@ class DiagnosticAgent:
         write_audit_record(report, final.get("llm_raw", ""))
         deliver_annotation(self.grafana, report)
         deliver_email(report, alert)
+        deliver_slack(report, alert)
         return report
