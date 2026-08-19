@@ -17,7 +17,13 @@ from typing import Any
 
 import yaml
 
-from .models import LogsProfile, MetricsProfile, PromptProfile, RedactionProfile
+from .models import (
+    ExecutionProfile,
+    LogsProfile,
+    MetricsProfile,
+    PromptProfile,
+    RedactionProfile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +60,10 @@ class IntegrationProfile:
     logs: LogsProfile
     redaction: RedactionProfile
     prompt: PromptProfile
-    service_map_path: str | None
-    runbooks_path: str | None
+    service_map_path: str | None = None
+    runbooks_path: str | None = None
+    execution: ExecutionProfile = ExecutionProfile(version=1, image="", actions=())
+    execution_profile_path: str | None = None
     # Unparseable profile YAML files (path + reason). Empty when load succeeded.
     # `diag validate` and agent startup treat these as hard failures so a broken
     # overlay cannot silently fall back to preset-only config.
@@ -249,6 +257,18 @@ def build_profile(
         if candidate.is_dir():
             runbooks_path = str(candidate)
 
+    execution_data: dict[str, Any] = {}
+    execution_profile_path: str | None = None
+    if root is not None:
+        exec_file = root / "execution_profile.yaml"
+        if exec_file.is_file():
+            try:
+                execution_data = _read_yaml(exec_file)
+                execution_profile_path = str(exec_file)
+            except ProfileLoadError as exc:
+                logger.error("%s", exc)
+                load_errors.append(str(exc))
+
     logger.info(
         "Loaded integration profile name=%s dir=%s preset=%s",
         name,
@@ -262,8 +282,10 @@ def build_profile(
         logs=LogsProfile.from_dict(logs_raw),
         redaction=RedactionProfile.from_dict(redaction_raw),
         prompt=PromptProfile.from_dict(prompt_raw),
+        execution=ExecutionProfile.from_dict(execution_data),
         service_map_path=service_map_path,
         runbooks_path=runbooks_path,
+        execution_profile_path=execution_profile_path,
         load_errors=tuple(load_errors),
     )
 

@@ -10,11 +10,13 @@ import logging
 
 from .clients.grafana import GrafanaClient
 from .clients.loki import LokiClient
+from .clients.pagerduty import PagerDutyClient
 from .clients.prometheus import PrometheusClient
 from .config import settings
 from .delivery.annotation import deliver_annotation
 from .delivery.audit import write_audit_record
 from .delivery.email import deliver_email
+from .delivery.pagerduty import deliver_pagerduty
 from .delivery.redact import active_rule_names
 from .delivery.slack import deliver_slack
 from .dependency_map import get_dependency_map
@@ -62,6 +64,13 @@ class DiagnosticAgent:
         self.prom = PrometheusClient(settings.prometheus_url)
         self.loki = LokiClient(settings.loki_url)
         self.grafana = GrafanaClient(settings.grafana_url, settings.grafana_token)
+        self.pagerduty = PagerDutyClient(
+            settings.pagerduty_api_url,
+            settings.pagerduty_api_token,
+            settings.pagerduty_service_id,
+            settings.pagerduty_from_email,
+            timeout=settings.pagerduty_timeout,
+        )
         self.dep_map = get_dependency_map(settings.resolved_service_map_path())
         self.rag = build_rag_store()
         self.llm = get_structured_diagnosis_llm()
@@ -70,7 +79,7 @@ class DiagnosticAgent:
         )
         self.graph = build_diagnostic_graph(self.nodes)
         logger.info(
-            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s, slack=%s, "
+            "DiagnosticAgent ready (chat=%s/%s, rag=%s, grafana=%s, email=%s, slack=%s, pagerduty=%s, "
             "redaction=%d rules)",
             settings.chat_provider,
             settings.chat_model,
@@ -78,6 +87,7 @@ class DiagnosticAgent:
             self.grafana.enabled,
             settings.email_enabled,
             settings.slack_enabled,
+            settings.pagerduty_enabled,
             len(self.redaction_rules),
         )
 
@@ -92,6 +102,9 @@ class DiagnosticAgent:
         }
         final = self.graph.invoke(initial)
         report = final.get("report", {})
+        pagerduty_result = deliver_pagerduty(self.pagerduty, report, alert)
+        if pagerduty_result:
+            report["pagerduty"] = pagerduty_result
 
         write_audit_record(report, final.get("llm_raw", ""))
         deliver_annotation(self.grafana, report)
