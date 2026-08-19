@@ -321,6 +321,21 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     return blind_eval.main(args.args, workspace=ws)
 
 
+def _cmd_replay(args: argparse.Namespace) -> int:
+    from .tools import replay_eval
+
+    ws = load_workspace(args.workspace)
+    _apply_workspace_env(ws)
+    forwarded: list[str] = []
+    if args.dataset:
+        forwarded.extend(["--dataset", args.dataset])
+    if args.out:
+        forwarded.extend(["--out", args.out])
+    if args.only:
+        forwarded.extend(["--only", args.only])
+    return replay_eval.main(forwarded, workspace=ws)
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -383,6 +398,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Arguments forwarded to the evaluator (--help for the full list)",
     )
     evaluate.set_defaults(func=_cmd_eval)
+
+    replay = sub.add_parser(
+        "replay",
+        help="Replay workspace alert scenarios and assert routing/runbook expectations",
+    )
+    _add_workspace_arg(replay)
+    replay.add_argument(
+        "--dataset",
+        default="",
+        metavar="PATH",
+        help="Replay dataset YAML (default: workspace scenarios file)",
+    )
+    replay.add_argument(
+        "--out",
+        default="",
+        metavar="DIR",
+        help="Directory for replay result JSON files",
+    )
+    replay.add_argument(
+        "--only",
+        default="",
+        metavar="IDS",
+        help="Comma-separated scenario id(s) to replay",
+    )
+    replay.set_defaults(func=_cmd_replay)
 
     from .install.cli import add_install_parser
 
