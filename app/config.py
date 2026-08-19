@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     exec_enabled: bool = False
     # Path to execution_profile.yaml. Empty -> resolve from the active profile dir.
     exec_profile_path: str = ""
+    # Extra destructive verb patterns (comma-separated regex fragments), merged
+    # with the built-in defaults. Example: "flush,evict".
+    exec_destructive_patterns: str = ""
 
     # --- Dependency map ---
     # Empty → resolve from profile service_map.yaml then package-root default.
