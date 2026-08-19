@@ -150,3 +150,74 @@ class PromptProfile:
             tool_run_hints=str(data.get("tool_run_hints") or cls.tool_run_hints).strip(),
             extends=data.get("extends"),
         )
+
+
+@dataclass(frozen=True)
+class ActionParam:
+    name: str
+    type: str = "string"
+    values: tuple[str, ...] = ()
+    source: str = ""
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> "ActionParam":
+        return cls(
+            name=name,
+            type=str(data.get("type", "string")),
+            values=tuple(str(v) for v in (data.get("values") or [])),
+            source=str(data.get("from", "")),
+        )
+
+
+@dataclass(frozen=True)
+class AllowlistedAction:
+    id: str
+    description: str
+    argv: tuple[str, ...]
+    params: tuple[ActionParam, ...]
+    scope_services: tuple[str, ...]
+    destructive: bool
+    timeout_s: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AllowlistedAction":
+        params_raw = data.get("params") or {}
+        params = tuple(
+            ActionParam.from_dict(pname, pdata or {})
+            for pname, pdata in params_raw.items()
+        )
+        scope = (data.get("scope") or {}).get("services") or []
+        return cls(
+            id=str(data["id"]),
+            description=str(data.get("description", "")),
+            argv=tuple(str(a) for a in (data.get("argv") or [])),
+            params=params,
+            scope_services=tuple(str(s) for s in scope),
+            destructive=bool(data.get("destructive", False)),
+            timeout_s=int(data.get("timeout_s", 60)),
+        )
+
+
+@dataclass(frozen=True)
+class ExecutionProfile:
+    version: int
+    image: str
+    actions: tuple[AllowlistedAction, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "ExecutionProfile":
+        data = data or {}
+        actions = tuple(
+            AllowlistedAction.from_dict(a) for a in (data.get("actions") or [])
+        )
+        return cls(
+            version=int(data.get("version", 1)),
+            image=str(data.get("image", "")),
+            actions=actions,
+        )
+
+    def get(self, action_id: str) -> "AllowlistedAction | None":
+        for action in self.actions:
+            if action.id == action_id:
+                return action
+        return None
