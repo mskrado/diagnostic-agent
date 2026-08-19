@@ -14,6 +14,29 @@ until this spec is merged and reviewer-approved, and until the routing eval harn
 
 ---
 
+## 0. How to use this spec set (read first)
+
+This overview is the **why** (threat model, architecture, invariants, gating). Each build issue has a
+**separate, explicit, near-copy-paste implementation spec** — work from that file, not from this one:
+
+| Issue | Implementation spec | Build order |
+|---|---|---|
+| [#50](https://github.com/mskrado/diagnostic-agent/issues/50) Sandbox runner | [`exec/50-sandbox-runner.md`](exec/50-sandbox-runner.md) | **1st** — establishes the shared execution foundation (config, profile model, `app/execution/` package). |
+| [#51](https://github.com/mskrado/diagnostic-agent/issues/51) Destructive classifier | [`exec/51-destructive-classifier.md`](exec/51-destructive-classifier.md) | **2nd** — needs #50's `AllowlistedAction` model. |
+| [#52](https://github.com/mskrado/diagnostic-agent/issues/52) execute node + parsing | [`exec/52-runbook-execute-node.md`](exec/52-runbook-execute-node.md) | **3rd** — needs #50, #51, and the routing graph from #44. |
+| [#53](https://github.com/mskrado/diagnostic-agent/issues/53) Verification loop | [`exec/53-verification-loop.md`](exec/53-verification-loop.md) | **4th** — needs #52. |
+
+Rules for the implementing agent of each issue:
+
+1. **One issue = one branch = one PR.** Branch name and PR base are stated at the top of each spec file.
+2. **Do only your issue's scope.** Each spec has a "What you are NOT doing" section — respect it.
+3. **Keep names/paths/signatures exactly as written** unless a linter forces a trivial change.
+4. **All four must land behind this overview PR (#54) merging first**, and stay `status:needs-spec` until
+   a reviewer relabels them `status:ready`.
+5. Run `pytest -q` before pushing; commit with `git commit -s` (DCO).
+
+---
+
 ## 1. Purpose & scope
 
 Give the diagnostic-agent the ability to **autonomously resolve a narrow, pre-approved class of
