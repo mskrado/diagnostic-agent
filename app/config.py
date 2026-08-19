@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = False
     smtp_timeout: float = 15.0
+    # PagerDuty outbound escalation / note delivery. Default OFF.
+    pagerduty_enabled: bool = False
+    pagerduty_api_url: str = "https://api.pagerduty.com"
+    pagerduty_api_token: str = ""
+    pagerduty_service_id: str = ""
+    pagerduty_from_email: str = ""
+    pagerduty_timeout: float = 10.0
     # --- Execution (Track B; default OFF, opt-in per host) ---
     # Master switch. When false, the sandbox refuses to run (defense in depth;
     # the graph branch is also gated in #52).
