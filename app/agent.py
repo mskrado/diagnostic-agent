@@ -20,6 +20,7 @@ from .delivery.pagerduty import deliver_pagerduty
 from .delivery.redact import active_rule_names
 from .delivery.slack import deliver_slack
 from .dependency_map import get_dependency_map
+from .execution.sandbox import Sandbox
 from .graph.build import build_diagnostic_graph
 from .graph.nodes import DiagnosticNodes
 from .llm import get_structured_diagnosis_llm
@@ -75,7 +76,7 @@ class DiagnosticAgent:
         self.rag = build_rag_store()
         self.llm = get_structured_diagnosis_llm()
         self.nodes = DiagnosticNodes(
-            self.prom, self.loki, self.grafana, self.dep_map, self.rag, self.llm
+            self.prom, self.loki, self.grafana, self.dep_map, self.rag, self.llm, Sandbox()
         )
         self.graph = build_diagnostic_graph(self.nodes)
         logger.info(
