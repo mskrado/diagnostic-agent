@@ -30,8 +30,20 @@ Include:
 
 ## Threat model notes
 
-- The agent is **hypotheses-only** — it must not execute remediation.
-- Runbooks retrieved via RAG become LLM context. Malicious runbook PRs are a
-  prompt-injection risk; corpus lint + human review are mandatory.
+- The agent is **hypotheses-only by default** and must stay that way unless a
+  host explicitly opts in. The LLM never emits commands; it can at most select a
+  named action a host has pre-approved.
+- Remediation, when enabled, is bounded by four controls that all fail closed:
+  `AGENT_EXEC_ENABLED` (off by default), a host-supplied allowlist in
+  `execution_profile.yaml` (presets ship zero actions), the destructive-action
+  classifier, and a container with no network, no mounts, no secrets, dropped
+  capabilities, and a read-only root filesystem. Actions are argv arrays — never
+  shell strings — so parameters cannot be interpolated into a command. Weakening
+  any of these is a security-relevant change; see
+  [docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md).
+- Runbooks retrieved via RAG become LLM context, and a runbook may also declare
+  executable steps. Malicious runbook PRs are both a prompt-injection risk and,
+  on a host with execution enabled, an action-selection risk; corpus lint +
+  human review are mandatory.
 - Redaction rules are host-configured; defaults scrub common secrets but hosts
   must add tenant / PII patterns for multi-tenant deployments.

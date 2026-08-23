@@ -6,6 +6,7 @@
 
 | | |
 |---|---|
+| **Status** | **Implemented** — `app/execution/sandbox.py`, `tests/test_sandbox.py`. Deviations recorded in [`../sandboxed-execution.md`](../sandboxed-execution.md#as-built-deviations-from-this-spec) |
 | **Issue** | [#50](https://github.com/mskrado/diagnostic-agent/issues/50) |
 | **Depends on** | Nothing (this issue establishes the shared execution foundation). |
 | **Blocks** | #51, #52, #53 |

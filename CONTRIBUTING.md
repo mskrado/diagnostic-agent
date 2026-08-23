@@ -76,7 +76,12 @@ This certifies the contribution under the [DCO 1.1](https://developercertificate
 
 ## Safety invariants (do not weaken)
 
-- Hypotheses only — no auto-remediation in runbooks or prompt profiles
+- Hypotheses only — no remediation steps in runbook prose or prompt profiles.
+  Anything executable belongs in a `runbook-actions` block naming an action the
+  host has allowlisted ([runbooks/README.md](runbooks/README.md#executable-steps-runbook-actions))
+- Execution stays opt-in and fail-closed: do not default `AGENT_ROUTING_ENABLED`
+  or `AGENT_EXEC_ENABLED` to true, ship actions in a preset, or bypass the
+  classifier / sandbox gates
 - Evidence must cite metrics/logs the agent was given
 - Contributed eval logs must be synthetic or fully redacted
 - Core system-prompt invariants are not overridable via `prompt_profile.yaml`

@@ -4,6 +4,7 @@
 
 | | |
 |---|---|
+| **Status** | **Not started** — `execute_runbook` currently ends the graph at `END`, so a successful action is never confirmed to have restored the signal. Blocks enabling execution on any host |
 | **Issue** | [#53](https://github.com/mskrado/diagnostic-agent/issues/53) |
 | **Depends on** | #52 (the `execute_runbook` node + graph branch). Uses the existing `PrometheusClient`. Delivery on resolve/escalate ideally uses #45 (Slack) / #46 (PagerDuty) if merged; if not, degrade to the existing email/annotation + audit. |
 | **Blocks** | Nothing (last Track B build issue). |
