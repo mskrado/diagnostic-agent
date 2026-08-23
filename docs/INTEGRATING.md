@@ -45,11 +45,12 @@ infrastructure/diagnostic-agent/
   redaction.yaml         # tenant / PII scrubbing
   prompt_profile.yaml    # how the LLM should describe your stack
   runbooks/              # markdown playbooks for RAG
-  scenarios.yaml         # alert -> runbook pairs, for `diag lint` / `diag e2e`
+  scenarios.yaml         # alert -> runbook pairs, for `diag lint` / `diag e2e` / `diag replay`
   blind_eval.yaml        # synthetic cases for `diag eval blind`
+  execution_profile.yaml # optional: allowlisted sandbox actions (omit to stay advisory-only)
 ```
 
-Larger hosts move the five profile YAMLs into a `profile/` subdirectory. Both
+Larger hosts move the profile YAMLs into a `profile/` subdirectory. Both
 layouts resolve automatically — see [WORKSPACE.md](WORKSPACE.md) for the
 **file-by-file** reference (purpose, how the agent uses each file, and how to
 configure it). The subsections below are a short integrating cheat-sheet.

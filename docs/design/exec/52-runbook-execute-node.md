@@ -4,6 +4,7 @@
 
 | | |
 |---|---|
+| **Status** | **Implemented** — `app/execution/runbook.py`, `execute_runbook` in `app/graph/nodes.py`, `tests/test_runbook_parse.py`, `tests/test_execute_node.py`. Ships without `when:` guards, multi-step execution, or the lint warning; see [`../sandboxed-execution.md`](../sandboxed-execution.md#as-built-deviations-from-this-spec) |
 | **Issue** | [#52](https://github.com/mskrado/diagnostic-agent/issues/52) |
 | **Depends on** | #50 (Sandbox), #51 (classifier), and #44 (conditional routing graph). If #44 is not merged yet, coordinate — this issue adds a node to the graph #44 introduces. |
 | **Blocks** | #53 |

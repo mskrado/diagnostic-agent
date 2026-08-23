@@ -4,6 +4,7 @@
 
 | | |
 |---|---|
+| **Status** | **Implemented** — `app/execution/classifier.py`, `tests/test_classifier.py`. Deviations recorded in [`../sandboxed-execution.md`](../sandboxed-execution.md#as-built-deviations-from-this-spec) |
 | **Issue** | [#51](https://github.com/mskrado/diagnostic-agent/issues/51) |
 | **Depends on** | #50 merged (needs `AllowlistedAction` model + `app/execution/` package). |
 | **Blocks** | #52 |

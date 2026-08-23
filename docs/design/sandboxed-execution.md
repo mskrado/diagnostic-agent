@@ -2,15 +2,87 @@
 
 | | |
 |---|---|
-| **Status** | Draft — for review |
+| **Status** | Approved — partially implemented, see [Implementation status](#implementation-status) |
 | **Gate issue** | [#54](https://github.com/mskrado/diagnostic-agent/issues/54) |
 | **Build issues** | [#50](https://github.com/mskrado/diagnostic-agent/issues/50) runner · [#51](https://github.com/mskrado/diagnostic-agent/issues/51) classifier · [#52](https://github.com/mskrado/diagnostic-agent/issues/52) execute node · [#53](https://github.com/mskrado/diagnostic-agent/issues/53) verification loop |
 | **Epic** | [#55](https://github.com/mskrado/diagnostic-agent/issues/55) |
 | **Supersedes invariant** | Partial, opt-in relaxation of the read-only guarantee (see §2) |
 
-This document is the **gate** for all Track B build work. Issues #50–#53 stay `status:needs-spec`
-until this spec is merged and reviewer-approved, and until the routing eval harness
-([#48](https://github.com/mskrado/diagnostic-agent/issues/48)) is green.
+This document was the **gate** for all Track B build work: #50–#53 stayed `status:needs-spec` until it
+merged and the routing eval harness ([#48](https://github.com/mskrado/diagnostic-agent/issues/48)) was
+green. Sections 1–15 describe the intended design and remain the reference for review. What is actually
+built is below.
+
+---
+
+## Implementation status
+
+| Component | Issue | Status |
+|---|---|---|
+| Severity routing + `should_route` | [#44](https://github.com/mskrado/diagnostic-agent/issues/44) | Landed — `app/graph/routing.py` |
+| Routing replay harness | [#48](https://github.com/mskrado/diagnostic-agent/issues/48) | Landed — `diag replay` (`app/tools/replay_eval.py`) |
+| Slack / PagerDuty delivery | [#45](https://github.com/mskrado/diagnostic-agent/issues/45) / [#46](https://github.com/mskrado/diagnostic-agent/issues/46) | Landed — `app/delivery/slack.py`, `app/delivery/pagerduty.py` |
+| Sandboxed runner | [#50](https://github.com/mskrado/diagnostic-agent/issues/50) | Landed — `app/execution/sandbox.py` |
+| Destructive-action classifier | [#51](https://github.com/mskrado/diagnostic-agent/issues/51) | Landed — `app/execution/classifier.py` |
+| `runbook-actions` parsing + `execute_runbook` node | [#52](https://github.com/mskrado/diagnostic-agent/issues/52) | Landed — `app/execution/runbook.py`, `app/graph/nodes.py` |
+| Dedup guard | [#47](https://github.com/mskrado/diagnostic-agent/issues/47) | **Not implemented** |
+| Post-execution verification loop | [#53](https://github.com/mskrado/diagnostic-agent/issues/53) | **Not implemented** — `execute_runbook` ends at `END` |
+
+Both safety gates named in §5 — the classifier, then the sandbox allowlist — are in place and both fail
+closed, and the default posture is unchanged (`AGENT_ROUTING_ENABLED` and `AGENT_EXEC_ENABLED` are
+both `false`, and presets ship zero actions). Two gaps still block pilot enablement:
+
+1. **#53 is not built**, so a successful action is never confirmed to have restored the signal — the
+   "confirm, don't assume" invariant of §5.6 is unmet.
+2. **Execution is invisible after the fact.** The report is finalized before `execute_runbook` runs, so
+   `matched_action` / `classifier_verdict` / `execution_result` never reach the audit record or the
+   delivered trace (§12 row below). An operator cannot tell from the audit log that the agent acted.
+
+Until both are closed, `AGENT_EXEC_ENABLED` should stay `false` everywhere.
+
+### As-built deviations from this spec
+
+Each open row needs its own issue before Track B can be called done.
+
+| § | Spec says | As built |
+|---|---|---|
+| 6 | `escalate`, `resolve`, and `deliver` are graph nodes | Only `execute_runbook` is a node; `report` and `escalate` terminate the graph, and delivery runs after `graph.invoke()` in `app/agent.py` on every route |
+| 6 | State carries `verification` and a typed `outcome` | No `verification` key; `outcome` is a plain `str`, set only by `execute_runbook` |
+| 7 | `exit_code = -TIMEOUT` | `-1` on timeout, `-2` when the `docker` binary is missing |
+| 7 | Bounded egress for actions that declare it | Always `--network none`; no per-action override |
+| 8 | `classify(action, params)` | `classify(action, params=None)` — `params` is accepted and ignored |
+| 9 | `should_route` gates on `exec_enabled`, dedup, and runbook match | It gates on `routing_enabled`, severity, `confidence_note`, and whether RAG returned context. Execution is still blocked with the switch off because `Sandbox.run` raises `ExecutionDisabled`, which `execute_runbook` catches and turns into an escalation |
+| 9 | `when:` step guards; params bound from state | `when:` is not parsed; `params` is always `{}` and the sandbox binds `incident.service` itself |
+| 9 | Run the matched runbook's steps | Only `steps[0]` runs |
+| 9 | `diag lint` warns on an unknown `action_id` | Not implemented — an unknown id silently drops the runbook to advisory-only |
+| 10 | Resolve the PagerDuty incident on recovery | No resolve call; the client only creates incidents and adds notes |
+| 12 | Audit and the delivered trace carry `matched_action`, `classifier_verdict`, and `execution_result` | The `report` dict is finalized in the `report` node, before `execute_runbook` runs, and delivery reads that dict. Execution fields stay in graph state, so nothing about the action reaches audit, Slack, or PagerDuty |
+| 11 | `exec_verify_timeout_s`, `exec_verify_interval_s`, `exec_max_severity` | Not in `app/config.py`; they belong to the unbuilt #53 |
+| 11 | Refuse to start when `exec_enabled=true` yields zero actions | Not implemented — a mis-mounted exec profile leaves a host silently unable to execute |
+| 11 | `exec_profile_path` resolves like other profile files | `AGENT_EXEC_PROFILE_PATH` only changes what `resolved_exec_profile_path()` reports; the loader always reads `{profile_dir}/execution_profile.yaml` |
+| 14 | Replay harness asserts the execute branch with a mock sandbox | `diag replay` asserts route decisions only |
+
+### As-built graph
+
+```
+detect → retrieve → rag_lookup → correlate → report
+                                               │
+                                        should_route()
+                    ┌──────────────────────────┼──────────────────────┐
+                    ▼                          ▼                      ▼
+                 report                    escalate                execute
+                  (END)                     (END)                     │
+                                                             execute_runbook
+                                                        (select → classify → sandbox)
+                                                                      │
+                                                                    (END)
+
+after graph.invoke(): PagerDuty → audit JSONL → Grafana annotation → email → Slack
+```
+
+Operator-facing documentation for what is built: [README](../../README.md#runbook-execution-opt-in),
+[`execution_profile.yaml`](../WORKSPACE.md#execution_profileyaml-optional), and
+[`runbook-actions`](../../runbooks/README.md#executable-steps-runbook-actions).
 
 ---
 

@@ -12,7 +12,8 @@ infrastructure/diagnostic-agent/
 ├── prompt_profile.yaml   # platform description + tool-run hints for the LLM
 ├── redaction.yaml        # tenant / PII scrubbing (fail-closed)
 ├── service_map.yaml      # topology / blast radius
-├── scenarios.yaml        # alert → runbook pairs for lint / e2e
+├── execution_profile.yaml # optional allowlist for sandboxed runbook actions
+├── scenarios.yaml        # alert → runbook pairs for lint / e2e / replay
 ├── blind_eval.yaml       # optional synthetic cases for `diag eval blind`
 └── runbooks/             # markdown playbooks for RAG
 ```
@@ -42,6 +43,7 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
    - [`prompt_profile.yaml`](#prompt_profileyaml)
    - [`redaction.yaml`](#redactionyaml)
    - [`service_map.yaml`](#service_mapyaml)
+   - [`execution_profile.yaml`](#execution_profileyaml-optional)
    - [`scenarios.yaml`](#scenariosyaml)
    - [`blind_eval.yaml`](#blind_evalyaml-optional)
    - [`runbooks/`](#runbooks)
@@ -289,18 +291,91 @@ names**.
 See `examples/spring-modular-monolith/service_map.yaml` for a modular-monolith
 shape.
 
+### `execution_profile.yaml` (optional)
+
+**Purpose.** The allowlist of actions the agent may run in its sandbox. This is
+the only place an action can come from — presets ship **zero** actions, and
+without this file the agent can never execute anything.
+
+**How it is used.** When a runbook's
+[`runbook-actions` block](../runbooks/README.md#executable-steps-runbook-actions)
+names an `action_id`, the agent looks it up here, classifies it, and runs its
+`argv` in a disposable container. Unknown ids, params outside their enum, and
+services outside `scope.services` are denied before a container starts. The file
+is read from the profile directory; `AGENT_EXEC_PROFILE_PATH` reports the
+resolved path but does not relocate the lookup.
+
+**How to configure.**
+
+| Field | Meaning |
+|---|---|
+| `image` | Container image the actions run in — pin by digest in production |
+| `actions[].id` | Name referenced by `runbook-actions` steps |
+| `actions[].description` | Human context; also scanned by the destructive classifier |
+| `actions[].argv` | Argv array, never a shell string. `{name}` tokens are substituted from `params` |
+| `actions[].params.<name>.type` | `string` or `enum` |
+| `actions[].params.<name>.values` | Allowed values for an `enum` param |
+| `actions[].params.<name>.from` | Bind from incident state, e.g. `incident.service` |
+| `actions[].scope.services` | Action may only target these services |
+| `actions[].destructive` | `true` forces a classifier hold → escalate, never runs |
+| `actions[].timeout_s` | Per-action kill deadline (default `60`) |
+
+```yaml
+version: 1
+image: "ghcr.io/mskrado/diagnostic-agent-sandbox:1"
+actions:
+  - id: clear-cdn-cache
+    description: "Purge the CDN edge cache for the affected service"
+    argv: ["cache-purge", "--service", "{service}", "--scope", "edge"]
+    params:
+      service:
+        type: enum
+        from: "incident.service"
+        values: ["web-gateway", "media-service"]
+    scope:
+      services: ["web-gateway", "media-service"]
+    timeout_s: 60
+```
+
+Nothing here runs until `AGENT_EXEC_ENABLED=true` **and**
+`AGENT_ROUTING_ENABLED=true`. See
+[docs/design/sandboxed-execution.md](design/sandboxed-execution.md) for the
+threat model and the container lockdown flags, and
+`examples/spring-modular-monolith/execution_profile.yaml` for a complete file.
+
 ### `scenarios.yaml`
 
 **Purpose.** Declares alert label sets paired with runbooks for
-`diag lint` / `diag e2e` (and related corpus checks).
+`diag lint` / `diag e2e` / `diag replay` (and related corpus checks).
 
 **How it is used.** Offline lint checks coverage; e2e posts each scenario’s
-labels to a running agent and scores the path. It does **not** replace
-Prometheus rule files (those live under install’s `observability/`).
+labels to a running agent and scores the path; replay runs the labels through
+the routing logic with no LLM or stack. It does **not** replace Prometheus rule
+files (those live under install’s `observability/`).
 
 **How to configure.** Keep `labels.alertname` / `service` aligned with both your
 Alertmanager rules and runbook filenames. Install seeds scenarios from the
 shipped alert catalog — trim or extend for your host.
+
+A scenario may add an optional `replay:` block pinning the route decision it
+should produce. Without it, replay expects `escalate` for `severity: critical`
+and `report` otherwise:
+
+```yaml
+scenarios:
+  - id: redis-connection-errors
+    runbook: runbook-redis-connection-errors.md
+    labels:
+      alertname: RedisConnectionErrors
+      service: platform-service
+      severity: warning
+    replay:
+      expected_route: execute        # report | escalate | execute
+      expected_runbook: runbook-redis-connection-errors.md
+      confidence_note: high          # simulated LLM confidence for this case
+```
+
+See [eval/README.md](../eval/README.md#routing-replay-eval-diag-replay).
 
 ### `blind_eval.yaml` (optional)
 
