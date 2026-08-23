@@ -62,6 +62,10 @@ scenarios:
     rag_must_contain:
       - redis
       - lettuce
+    replay:
+      expected_route: execute
+      expected_runbook: runbook-redis-connection-errors.md
+      confidence_note: high
 
   - id: elasticsearch-degraded
     runbook: runbook-elasticsearch-degraded.md
@@ -235,3 +239,7 @@ scenarios:
       - gateway
       - timeout
       - upstream
+    replay:
+      expected_route: execute
+      expected_runbook: runbook-gateway-upstream-errors.md
+      confidence_note: high

@@ -6,7 +6,10 @@ When an alert fires, the agent pulls **metrics** (Prometheus), **logs** (Loki),
 and **dependency context**, retrieves relevant **runbooks** (RAG), reasons with
 a pluggable LLM, and emits a structured diagnostic report.
 
-**Hypotheses only — no auto-remediation.**
+**Hypotheses only by default — no auto-remediation.** Opt-in
+[runbook execution](#runbook-execution-opt-in) exists behind `AGENT_EXEC_ENABLED`
+and runs only pre-approved, allowlisted actions in a locked-down sandbox. It is
+off unless a host deliberately turns it on.
 
 Integrating into *any* project means supplying a **workspace** — configuration
 and content that live in *your* repository — **not** forking this codebase.
@@ -18,9 +21,9 @@ Topics in this README:
 - [Quick start — install against your stack](#quick-start--install-against-your-stack) — generate an agent + wiring bundle with `diag install`
 - [Quick start (hello-world workspace)](#quick-start-hello-world-workspace) — run the agent locally or in Docker against the bundled example
 - [Host workspace](#host-workspace) — manifest, profile files, preset chain, [fail-closed redaction](#redaction-is-fail-closed)
-- [Architecture](#architecture) — alert → LangGraph pipeline → report
+- [Architecture](#architecture) — alert → LangGraph pipeline → route → report, plus [routing](#routing-opt-in) and [runbook execution](#runbook-execution-opt-in)
 - [Configuration](#configuration) — every `AGENT_` environment variable
-- [Tools](#tools) — `diag validate` / `lint` / `doctor` / `e2e` / `eval` / `serve`
+- [Tools](#tools) — `diag validate` / `lint` / `doctor` / `e2e` / `eval` / `replay` / `serve`
 - [Develop](#develop) — local environment and test run
 - [License](#license) · [Contributing](#contributing)
 
@@ -32,7 +35,8 @@ Additional documentation:
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
 | [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
-| [eval/README.md](eval/README.md) | Blind eval: what "blind" means, how logs are injected, scoring against ground truth |
+| [eval/README.md](eval/README.md) | Blind eval and routing replay: how cases are scored offline |
+| [docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md) | Execution design: threat model, invariants, sandbox/classifier contracts, implementation status |
 | [docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md) | Contribution lifecycle: environments, branching, issue workflow, CI/CD, release |
 | [SECURITY.md](SECURITY.md) | Supported versions, vulnerability reporting, threat model notes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to propose changes and the community expectations |
@@ -162,9 +166,75 @@ Prometheus alert ──▶ Alertmanager ──▶ POST /alert
                                          │
                                    LangGraph:
                      detect → retrieve → rag_lookup → correlate → report
-                                         │
-                              audit JSONL + optional email / Grafana annotation
+                                                                    │
+                                                             should_route()
+                        ┌───────────────────────┬───────────────────┴────────┐
+                        ▼                       ▼                            ▼
+                     report                 escalate                     execute
+                        │                       │                            │
+                        │                       │                    execute_runbook
+                        │                       │                  (classifier → sandbox)
+                        └───────────────────────┴────────────┬───────────────┘
+                                                             │
+              audit JSONL + optional Slack / PagerDuty / email / Grafana annotation
 ```
+
+Delivery runs after the graph completes, on every route. Which channels fire
+depends on the route: PagerDuty opens an incident on `escalate`, Slack and email
+post the reasoning trace whenever they are enabled.
+
+### Routing (opt-in)
+
+Routing is off by default (`AGENT_ROUTING_ENABLED=false`), in which case
+`should_route` always returns `report` and the agent behaves exactly like the
+linear read-only pipeline. Once enabled:
+
+| Condition | Route |
+|---|---|
+| Severity normalizes to SEV1 or SEV2 | `escalate` |
+| `confidence_note: low` | `escalate` |
+| `confidence_note: high` **and** runbook context was retrieved | `execute` |
+| Anything else | `report` |
+
+Host severity strings normalize onto SEV1–SEV4 (`critical`/`p1`/`fatal` → SEV1,
+`warning`/`warn`/`medium` → SEV3, …); anything unrecognized becomes `UNKNOWN`
+and never escalates on severity alone. The decision is recorded as
+`route_decision` in the report and the audit record, so you can enable routing
+and observe the decisions before enabling execution.
+
+### Runbook execution (opt-in)
+
+The `execute` route reaches the `execute_runbook` node, which is fail-closed at
+every step:
+
+1. Select an executable runbook — one that declares a
+   [`runbook-actions` block](runbooks/README.md#executable-steps-runbook-actions)
+   matching the alert type, service, and confidence. Zero or multiple matches
+   escalate.
+2. Resolve the step's `action_id` in
+   [`execution_profile.yaml`](docs/WORKSPACE.md#execution_profileyaml-optional).
+   Presets ship **zero** actions, so an unconfigured host has nothing to run.
+3. Run the destructive-action classifier. A `hold` verdict escalates without
+   ever reaching the sandbox.
+4. Run the action through `Sandbox`, which refuses everything unless
+   `AGENT_EXEC_ENABLED=true` and executes argv arrays (never shell strings) in a
+   disposable container with no network, no mounts, dropped capabilities, a
+   read-only root filesystem, and a per-action timeout.
+
+Anything missing, ambiguous, denied, non-zero, or raised sets
+`outcome: escalated`, leaving the incident to a human. Command output is
+redacted at the sandbox boundary as soon as it leaves the container. Note that
+the report is finalized before this node runs, so the action and its result are
+currently visible only in graph state and the agent log — not in the audit
+record or the Slack / PagerDuty trace.
+
+With shipped defaults — execution disabled, no allowlisted actions, no
+`runbook-actions` blocks in the corpus — the branch can only escalate. Design,
+threat model, and current implementation status:
+**[docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md)**.
+Post-execution verification of recovery
+([#53](https://github.com/mskrado/diagnostic-agent/issues/53)) is not
+implemented yet, so the branch ends after the sandbox call.
 
 ## Configuration
 
@@ -184,6 +254,31 @@ All settings use the `AGENT_` prefix (see `.env.example`).
 | `AGENT_SERVICE_MAP_PATH` | *(from profile)* | Override topology file |
 | `AGENT_RUNBOOKS_PATH` | *(from profile or `./runbooks`)* | Override RAG corpus |
 
+### Routing and execution
+
+Every switch here defaults to off, so enabling them is always a deliberate act.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `AGENT_ROUTING_ENABLED` | `false` | Enable [severity routing](#routing-opt-in). Off means every alert takes the `report` route |
+| `AGENT_EXEC_ENABLED` | `false` | Master switch for [runbook execution](#runbook-execution-opt-in). Off makes the sandbox refuse every action |
+| `AGENT_EXEC_PROFILE_PATH` | *(from profile)* | Reported path of `execution_profile.yaml`. The allowlist itself is always read from the profile directory |
+| `AGENT_EXEC_DESTRUCTIVE_PATTERNS` | *(empty)* | Extra destructive verb patterns, comma-separated, merged with the built-in list |
+
+### Delivery
+
+| Variable | Default | Notes |
+|---|---|---|
+| `AGENT_AUDIT_LOG_DIR` | `<repo>/audit` | JSONL audit records, one per diagnosis |
+| `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Needs `AGENT_GRAFANA_TOKEN` |
+| `AGENT_EMAIL_ENABLED` | `true` | With `AGENT_EMAIL_TO` and the `AGENT_SMTP_*` settings |
+| `AGENT_SLACK_ENABLED` | `false` | Posts the reasoning trace; needs `AGENT_SLACK_WEBHOOK_URL`. Optional `AGENT_SLACK_CHANNEL`, `AGENT_SLACK_USERNAME` |
+| `AGENT_PAGERDUTY_ENABLED` | `false` | Needs `AGENT_PAGERDUTY_API_TOKEN` and `AGENT_PAGERDUTY_FROM_EMAIL`; `AGENT_PAGERDUTY_SERVICE_ID` to open incidents |
+
+PagerDuty opens an incident when the route is `escalate`. When the alert already
+carries an incident id and the diagnosis is high-confidence, it appends a note
+instead. All delivered text passes through the redaction rules.
+
 ## Tools
 
 Every command runs against a workspace, so host projects use the published
@@ -191,11 +286,14 @@ image rather than writing their own scripts.
 
 | Command | Purpose |
 |---|---|
+| `diag install` | Discover a running stack and generate an agent + wiring bundle ([INSTALL.md](docs/INSTALL.md)) |
 | `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
 | `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
 | `diag doctor` | Probe Prometheus, Loki, Grafana, and SMTP connectivity |
+| `diag health-check` | Report the resolved workspace and profile health without a running server |
 | `diag e2e --url` | POST every scenario at a running agent and assert the report + redaction |
 | `diag eval blind` | Score LLM root-cause identification against the workspace dataset |
+| `diag replay` | Replay scenarios through the routing logic and score route decisions — no LLM, no stack ([eval/README.md](eval/README.md#routing-replay-eval-diag-replay)) |
 | `diag serve` | Run the `/alert` webhook server |
 
 ## Develop

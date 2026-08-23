@@ -19,11 +19,15 @@ from ..clients.loki import LokiClient
 from ..clients.prometheus import PrometheusClient
 from ..config import settings
 from ..dependency_map import DependencyMap
+from ..execution.classifier import classify
+from ..execution.runbook import load_executable_runbooks, select_runbook
+from ..execution.sandbox import Sandbox
 from ..llm import content_to_text, invoke_structured_diagnosis
 from ..llm_usage import extract_token_usage
 from ..profile import get_profile
 from ..rag.store import RagStore
 from .prompts import build_system_prompt
+from .routing import normalize_severity, should_route
 from .state import DiagnosticState
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,7 @@ class DiagnosticNodes:
         dep_map: DependencyMap,
         rag: RagStore,
         llm,
+        sandbox=None,
     ):
         self.prom = prom
         self.loki = loki
@@ -55,6 +60,7 @@ class DiagnosticNodes:
         self.dep_map = dep_map
         self.rag = rag
         self.llm = llm
+        self.sandbox = sandbox
 
     # ---- detect --------------------------------------------------------
     def detect(self, state: DiagnosticState) -> DiagnosticState:
@@ -73,6 +79,9 @@ class DiagnosticNodes:
             "service": service,
             "alert_type": state.get("alert_type") or labels.get("alertname", "unknown"),
             "severity": state.get("severity") or labels.get("severity", "unknown"),
+            "severity_normalized": normalize_severity(
+                state.get("severity") or labels.get("severity")
+            ),
             "module_hint": module_hint,
         }
 
@@ -254,15 +263,19 @@ class DiagnosticNodes:
             "llm_system_prompt": system_prompt,
             "llm_user_prompt": user_content,
             "llm_token_usage": token_usage,
+            "route": state.get("route", "report"),
         }
 
     # ---- report --------------------------------------------------------
     def report(self, state: DiagnosticState) -> DiagnosticState:
         rag_ctx = state.get("rag_context") or ""
+        route = should_route(state)
         report = {
             "service": state.get("service"),
             "alert_type": state.get("alert_type"),
             "severity": state.get("severity"),
+            "severity_normalized": state.get("severity_normalized"),
+            "route_decision": route,
             "module": state.get("module_hint") or None,
             "dependencies_checked": state.get("dependencies", []),
             "blast_radius": state.get("blast_radius", []),
@@ -287,4 +300,62 @@ class DiagnosticNodes:
                 **settings.model_snapshot(),
             },
         }
-        return {**state, "report": report}
+        return {**state, "route": route, "report": report}
+
+    # ---- execute_runbook (Track B) ------------------------------------
+    def execute_runbook(self, state: DiagnosticState) -> DiagnosticState:
+        """Run a matched, non-destructive, allowlisted action in the sandbox.
+
+        Never raises. Any problem -> outcome 'escalated' (a human takes over).
+        Only reachable on the automation-candidate branch (see build.py); the
+        severity gate + exec_enabled check happen upstream in routing (#44).
+        """
+        service = state.get("service", "") or ""
+        alert_type = state.get("alert_type", "") or ""
+        diagnosis = state.get("hypotheses", {}) or {}
+        confidence = str(diagnosis.get("confidence_note", "low"))
+
+        try:
+            runbooks = load_executable_runbooks(settings.resolved_runbooks_path())
+            runbook = select_runbook(
+                runbooks,
+                alert_type=alert_type,
+                service=service,
+                confidence_note=confidence,
+            )
+            if runbook is None:
+                return {**state, "route": "escalate", "outcome": "escalated"}
+
+            step = runbook.steps[0]
+            action = get_profile().execution.get(step.action_id)
+            if action is None:
+                return {**state, "route": "escalate", "outcome": "escalated"}
+
+            verdict = classify(action)
+            matched_action = {
+                "runbook": runbook.path,
+                "action_id": action.id,
+                "params": {},
+            }
+            if verdict.decision == "hold":
+                return {
+                    **state,
+                    "matched_action": matched_action,
+                    "classifier_verdict": verdict.__dict__,
+                    "route": "escalate",
+                    "outcome": "escalated",
+                }
+
+            result = self.sandbox.run(action.id, {}, service=service)
+            state_out = {
+                **state,
+                "matched_action": matched_action,
+                "classifier_verdict": verdict.__dict__,
+                "execution_result": result.__dict__,
+            }
+            if result.denied or result.exit_code != 0:
+                return {**state_out, "route": "escalate", "outcome": "escalated"}
+            return {**state_out, "route": "execute"}
+        except Exception as exc:  # noqa: BLE001 - never crash the graph
+            logger.error("execute_runbook failed: %s", exc)
+            return {**state, "route": "escalate", "outcome": "escalated"}

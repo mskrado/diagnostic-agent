@@ -4,6 +4,10 @@ Measures how well the configured LLM identifies a root cause **from logs alone,
 with no runbook/RAG context and no hints**. This isolates the model's reasoning
 from the local knowledge base — the whole point of the exercise.
 
+A second, much cheaper harness lives in this document too:
+[routing replay](#routing-replay-eval-diag-replay) (`diag replay`) scores route
+decisions with no LLM and no running stack.
+
 ---
 
 ## Topics
@@ -15,6 +19,7 @@ from the local knowledge base — the whole point of the exercise.
 5. [Run it](#run-it)
 6. [Metrics reported](#metrics-reported)
 7. [Interpreting results](#interpreting-results)
+8. [Routing replay eval (`diag replay`)](#routing-replay-eval-diag-replay)
 
 ---
 
@@ -376,3 +381,86 @@ from `false` to `true`).
 
 Compare a RAG-off run (this eval) against a RAG-on run (point `--live-url` at an
 agent started with RAG enabled) to quantify how much the runbooks actually help.
+
+---
+
+# Routing replay eval (`diag replay`)
+
+Where the blind eval measures the *model*, replay measures the *routing*: given
+an alert's labels and a simulated confidence, does
+[`should_route`](../app/graph/routing.py) send it to `report`, `escalate`, or
+`execute`? It calls no LLM, no Prometheus, no Loki, and no sandbox, so it runs
+in CI on every push and is the guard you want before enabling routing — let
+alone execution — on a real host.
+
+```bash
+diag replay                                   # every scenario in the workspace
+diag replay --only redis-connection-errors    # one case
+diag replay --dataset ./scenarios.yaml --out ./replay-results
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--dataset PATH` | workspace `scenarios.yaml` | Replay cases. Reads a top-level `scenarios:` (or `cases:`) list |
+| `--out DIR` | `<workspace>/replay-results/` | Where `replay-eval-<UTC-timestamp>.json` is written |
+| `--only IDS` | *all cases* | Comma-separated scenario `id` values; unknown ids print a warning |
+
+## What a case looks like
+
+Replay reuses the scenarios you already keep for `diag lint` / `diag e2e`. The
+optional `replay:` block pins the expectation; see
+[WORKSPACE.md](../docs/WORKSPACE.md#scenariosyaml).
+
+```yaml
+scenarios:
+  - id: redis-connection-errors
+    runbook: runbook-redis-connection-errors.md
+    labels:
+      alertname: RedisConnectionErrors
+      service: platform-service
+      severity: warning
+    replay:
+      expected_route: execute
+      expected_runbook: runbook-redis-connection-errors.md
+      confidence_note: high
+```
+
+Defaults when `replay:` is absent or partial:
+
+| Field | Default |
+|---|---|
+| `expected_route` | `escalate` when `labels.severity` is `critical`, else `report` |
+| `expected_runbook` | the case's `runbook` when the expected route is `execute`, else none |
+| `confidence_note` | `high` when the expected route is `execute`, else `medium` |
+
+## How it runs
+
+Each case is turned into a minimal state — severity, normalized severity, the
+simulated `confidence_note`, and a stand-in `rag_context` naming the selected
+runbook — and passed through the real `should_route`. Routing is **forced on**
+for the duration of the run and restored afterwards, so results do not depend on
+`AGENT_ROUTING_ENABLED`. A case passes when both the route and the selected
+runbook match the expectation.
+
+```
+ok   redis-connection-errors: route=execute runbook=runbook-redis-connection-errors.md
+FAIL db-pool-exhaustion: route=report expected=execute; runbook=(none) expected=runbook-db-pool-exhaustion.md
+
+Summary:
+  cases: 12
+  passed: 11
+  failed: 1
+  pass_rate: 0.917
+```
+
+The same summary plus per-case rows is written to
+`<workspace>/replay-results/replay-eval-<timestamp>.json`, and the command exits
+`1` if any case fails.
+
+## What it does not cover
+
+Replay stops at the route decision. It does not exercise `execute_runbook`,
+the destructive classifier, the sandbox, or delivery, and it does not read
+`AGENT_EXEC_ENABLED`. A green replay run means alerts are routed as intended —
+not that an action would be safe to run. For that, see
+[docs/design/sandboxed-execution.md](../docs/design/sandboxed-execution.md).

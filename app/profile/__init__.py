@@ -15,10 +15,17 @@ from .loader import (
     load_preset,
     reset_profile_cache,
 )
-from .models import LogsProfile, MetricsProfile, PromptProfile, RedactionProfile
+from .models import (
+    ExecutionProfile,
+    LogsProfile,
+    MetricsProfile,
+    PromptProfile,
+    RedactionProfile,
+)
 
 __all__ = [
     "IntegrationProfile",
+    "ExecutionProfile",
     "LogsProfile",
     "MetricsProfile",
     "ProfileLoadError",
