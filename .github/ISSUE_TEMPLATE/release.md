@@ -1,13 +1,13 @@
 ---
 name: Release Checklist
-about: Pre-flight checklist for a devel → main publish (GHCR / PyPI)
+about: Pre-flight checklist for a devel -> main publish (GHCR / PyPI)
 title: "[RELEASE] vX.Y.Z"
 labels: ["release"]
 ---
 
 **Target version**: vX.Y.Z
 **Release manager**:
-**Release PR**: devel → main #
+**Release PR**: devel -> main #
 
 ## Scope
 
@@ -17,7 +17,7 @@ labels: ["release"]
 ## Pre-merge checklist
 
 - [ ] Release notes inventory generated (`scripts/generate-release-notes.ps1` / `.sh`) and pasted above
-- [ ] PR title is `Release: vX.Y.Z (devel → main)` — **not** bare `Devel`
+- [ ] PR title is `Release: vX.Y.Z (devel -> main)` — **not** bare `Devel`
 - [ ] All in-scope child issues closed or explicitly deferred
 - [ ] Breaking workspace / CLI / profile contract changes documented in `docs/`
 - [ ] `.env.example` updated if new `AGENT_*` settings

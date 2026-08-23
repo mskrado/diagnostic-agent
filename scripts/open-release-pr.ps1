@@ -54,7 +54,7 @@ $inventory
 
 ## Pre-merge checklist
 - [ ] Release notes inventory generated and pasted above
-- [ ] PR title is ``Release: $label (devel → main)`` — **not** bare ``Devel``
+- [ ] PR title is ``Release: $label (devel -> main)`` — **not** bare ``Devel``
 - [ ] All in-scope child issues closed or explicitly deferred
 - [ ] Breaking workspace / CLI / profile contract changes documented in ``docs/``
 - [ ] ``.env.example`` updated if new ``AGENT_*`` settings
@@ -74,7 +74,7 @@ $inventory
 "@
 
   $issueUrl = gh issue create `
-    --title "[RELEASE] $label (devel → main)" `
+    --title "[RELEASE] $label (devel -> main)" `
     --label "release" `
     --body $issueBody
   $issueNumber = ($issueUrl -split '/')[-1]
@@ -110,7 +110,8 @@ $inventory
   $prBodyFile = Join-Path $env:TEMP "diagnostic-agent-release-pr-$label.md"
   [System.IO.File]::WriteAllText($prBodyFile, $prBody)
 
-  $title = "Release: $label (devel → main)"
+  # Use ASCII "->" in titles — Unicode "→" mojibakes under Windows gh/console encodings.
+  $title = "Release: $label (devel -> main)"
   $draftArgs = @()
   if ($Draft) { $draftArgs += "--draft" }
 
