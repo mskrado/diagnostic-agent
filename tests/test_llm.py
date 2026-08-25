@@ -114,6 +114,73 @@ def test_invoke_structured_diagnosis_falls_back_on_tooluse_error(monkeypatch):
     base.invoke.assert_called_once()
 
 
+def test_invoke_structured_diagnosis_repairs_partial_tool_args():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    raw = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "Diagnosis",
+                "args": {
+                    "issue_categories": [
+                        {
+                            "category": "auth",
+                            "cause": "bad JWT",
+                            "confidence": 80,
+                            "evidence": "401",
+                            "suggested_next_step": "Check JWKS",
+                        }
+                    ]
+                },
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    structured = MagicMock()
+    structured.invoke.return_value = {
+        "parsed": None,
+        "raw": raw,
+        "parsing_error": ValueError("primary_hypothesis Field required"),
+    }
+    out = llm_mod.invoke_structured_diagnosis(
+        structured, [HumanMessage(content="diagnose")]
+    )
+    assert out["parsing_error"] is None
+    assert out["parsed"].primary_hypothesis.cause == "bad JWT"
+    assert out["parsed"].suggested_next_steps == ["Check JWKS"]
+
+
+def test_invoke_structured_diagnosis_retries_json_when_unrepairable(monkeypatch):
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.graph.schema import Diagnosis, Hypothesis
+
+    structured = MagicMock()
+    structured.invoke.return_value = {
+        "parsed": None,
+        "raw": AIMessage(content="not json at all"),
+        "parsing_error": ValueError("bad schema"),
+    }
+    diagnosis = Diagnosis(
+        primary_hypothesis=Hypothesis(cause="recovered", confidence=60, evidence="retry"),
+        blast_radius_assessment="limited",
+        suggested_next_steps=["retry worked"],
+        confidence_note="medium",
+    )
+    base = MagicMock()
+    base.invoke.return_value = AIMessage(content=diagnosis.model_dump_json())
+    monkeypatch.setattr(llm_mod, "get_chat_model", lambda **kwargs: base)
+
+    out = llm_mod.invoke_structured_diagnosis(
+        structured, [HumanMessage(content="diagnose")]
+    )
+    assert out["parsed"].primary_hypothesis.cause == "recovered"
+    assert out["parsing_error"] is None
+    base.invoke.assert_called_once()
+
+
 def test_get_chat_model_merges_temperature_default(monkeypatch):
     monkeypatch.setattr(settings, "chat_provider", "ollama")
     monkeypatch.setattr(settings, "chat_model", "mistral:7b-instruct")

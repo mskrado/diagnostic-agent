@@ -150,13 +150,91 @@ def _extract_json_object(text: str) -> str:
     return raw[start : end + 1]
 
 
-def _diagnosis_json_fallback(messages: list) -> dict:
-    """Plain-chat JSON parse when Converse ToolUse fails (Nova ModelErrorException)."""
+def _tool_call_args(raw_msg: Any) -> dict[str, Any] | None:
+    """Best-effort extract of structured tool-call args from a chat message."""
+    if raw_msg is None:
+        return None
+    tool_calls = getattr(raw_msg, "tool_calls", None) or []
+    for call in tool_calls:
+        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+        if isinstance(args, dict) and args:
+            return args
+    additional = getattr(raw_msg, "additional_kwargs", None) or {}
+    if isinstance(additional, dict):
+        for call in additional.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function") or {}
+            raw_args = fn.get("arguments") if isinstance(fn, dict) else None
+            if isinstance(raw_args, dict) and raw_args:
+                return raw_args
+            if isinstance(raw_args, str) and raw_args.strip():
+                try:
+                    parsed = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict) and parsed:
+                    return parsed
+    return None
+
+
+def extract_diagnosis_payload(raw_msg: Any) -> dict[str, Any] | None:
+    """Pull a Diagnosis-shaped dict from tool args or message text."""
+    args = _tool_call_args(raw_msg)
+    if args is not None:
+        return args
+    content = content_to_text(getattr(raw_msg, "content", ""))
+    if not content.strip():
+        return None
+    try:
+        payload = json.loads(_extract_json_object(content))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def parse_diagnosis_payload(payload: dict[str, Any]) -> Diagnosis:
+    """Validate a Diagnosis dict (runs ``repair_diagnosis_payload`` via schema)."""
+    return Diagnosis.model_validate(payload)
+
+
+def _repair_structured_result(result: dict) -> dict:
+    """If LangChain left ``parsed=None``, coerce partial tool args / JSON."""
+    if result.get("parsed") is not None:
+        return result
+    raw_msg = result.get("raw")
+    payload = extract_diagnosis_payload(raw_msg)
+    if not payload:
+        return result
+    try:
+        parsed = parse_diagnosis_payload(payload)
+    except Exception as parse_exc:  # noqa: BLE001
+        logger.warning("Partial Diagnosis repair failed: %s", parse_exc)
+        return {
+            "parsed": None,
+            "raw": raw_msg,
+            "parsing_error": parse_exc,
+        }
+    logger.info("Repaired partial Diagnosis structured output into valid schema")
+    return {"parsed": parsed, "raw": raw_msg, "parsing_error": None}
+
+
+def _diagnosis_json_fallback(
+    messages: list, *, parse_hint: BaseException | None = None
+) -> dict:
+    """Plain-chat JSON parse when Converse ToolUse fails or schema parse fails."""
+    hint = ""
+    if parse_hint is not None:
+        hint = (
+            f" Previous structured output failed validation: {parse_hint}. "
+            "Include ALL required fields."
+        )
     base = get_chat_model(for_structured_output=True)
     fallback_messages = list(messages) + [
         HumanMessage(
             content=(
-                "IMPORTANT: The structured tool call failed. Respond with ONLY a "
+                "IMPORTANT: The structured tool call failed or was incomplete."
+                f"{hint} Respond with ONLY a "
                 "single JSON object matching the Diagnosis schema from the system "
                 "prompt (issue_categories, primary_hypothesis, secondary_hypotheses, "
                 "blast_radius_assessment, suggested_next_steps, tool_run_examples, "
@@ -168,7 +246,9 @@ def _diagnosis_json_fallback(messages: list) -> dict:
     content = content_to_text(getattr(raw_msg, "content", ""))
     try:
         payload = json.loads(_extract_json_object(content))
-        parsed = Diagnosis.model_validate(payload)
+        if not isinstance(payload, dict):
+            raise ValueError("fallback JSON was not an object")
+        parsed = parse_diagnosis_payload(payload)
         return {"parsed": parsed, "raw": raw_msg, "parsing_error": None}
     except Exception as parse_exc:  # noqa: BLE001
         logger.warning("JSON fallback parse failed: %s", parse_exc)
@@ -176,17 +256,30 @@ def _diagnosis_json_fallback(messages: list) -> dict:
 
 
 def invoke_structured_diagnosis(structured_llm, messages: list) -> dict:
-    """Invoke Diagnosis structured output; fall back to JSON on Nova ToolUse errors.
+    """Invoke Diagnosis structured output with repair + JSON fallback.
+
+    Order:
+    1. Structured ToolUse invoke.
+    2. If ``parsed`` is missing, repair partial tool args / JSON from ``raw``.
+    3. If still missing, one JSON-chat retry (also used on Nova ToolUse errors).
 
     Returns the same shape as ``with_structured_output(..., include_raw=True)``:
     ``{"parsed", "raw", "parsing_error"}``.
     """
     try:
         result = structured_llm.invoke(messages)
-        if isinstance(result, dict):
-            return result
-        # Some bindings return the pydantic model directly
-        return {"parsed": result, "raw": None, "parsing_error": None}
+        if not isinstance(result, dict):
+            # Some bindings return the pydantic model directly
+            return {"parsed": result, "raw": None, "parsing_error": None}
+        repaired = _repair_structured_result(result)
+        if repaired.get("parsed") is not None:
+            return repaired
+        parse_err = repaired.get("parsing_error") or result.get("parsing_error")
+        logger.warning(
+            "LLM structured output parse failed (%s); retrying via JSON fallback",
+            parse_err,
+        )
+        return _diagnosis_json_fallback(messages, parse_hint=parse_err)
     except Exception as exc:  # noqa: BLE001
         if not is_tooluse_model_error(exc):
             raise
@@ -194,4 +287,4 @@ def invoke_structured_diagnosis(structured_llm, messages: list) -> dict:
             "Bedrock ToolUse structured output failed (%s); retrying via JSON fallback",
             exc,
         )
-        return _diagnosis_json_fallback(messages)
+        return _diagnosis_json_fallback(messages, parse_hint=exc)

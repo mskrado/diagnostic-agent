@@ -78,13 +78,20 @@ def test_correlate_structured_output_success():
     assert reported["report"]["models"]["chat_model"] == exchange["chat_model"]
 
 
-def test_correlate_structured_output_parse_failure():
+def test_correlate_structured_output_parse_failure(monkeypatch):
+    import app.llm as llm_mod
+
     llm = MagicMock()
     llm.invoke.return_value = {
         "parsed": None,
         "raw": AIMessage(content="not valid"),
         "parsing_error": ValueError("bad schema"),
     }
+    # Retry path also fails so correlate surfaces the unavailable-diagnosis error.
+    fallback = MagicMock()
+    fallback.invoke.return_value = AIMessage(content="still not valid")
+    monkeypatch.setattr(llm_mod, "get_chat_model", lambda **kwargs: fallback)
+
     nodes = _nodes_with_llm(llm)
     state = {
         "alert_type": "HighErrorRate",
@@ -99,4 +106,5 @@ def test_correlate_structured_output_parse_failure():
     }
     out = nodes.correlate(state)
     assert "error" in out["hypotheses"]
-    assert out["hypotheses"]["raw"] == "not valid"
+    assert out["hypotheses"]["raw"] == "still not valid"
+    fallback.invoke.assert_called_once()

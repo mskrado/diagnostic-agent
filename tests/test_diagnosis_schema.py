@@ -80,3 +80,55 @@ def test_diagnosis_schema_defaults_new_lists_empty():
     assert diag.tool_run_examples == []
     assert diag.fix_suggestions == []
     assert diag.issue_categories == []
+
+
+def test_diagnosis_repairs_partial_nova_payload_from_categories():
+    """Nova Micro often omits required top-level fields; coerce from categories."""
+    from app.graph.schema import repair_diagnosis_payload
+
+    partial = {
+        "issue_categories": [
+            {
+                "category": "auth",
+                "cause": "JWT validation failures",
+                "confidence": 70,
+                "evidence": "SecurityAuthAnomaly in logs",
+                "suggested_next_step": "Check IdP JWKS",
+            }
+        ],
+        "secondary_hypotheses": [
+            {"cause": "misconfigured realm", "confidence": 30, "evidence": "realm"}
+        ],
+    }
+    repaired = repair_diagnosis_payload(partial)
+    assert repaired["primary_hypothesis"]["cause"] == "JWT validation failures"
+    assert repaired["blast_radius_assessment"] == "none identified"
+    assert repaired["suggested_next_steps"] == ["Check IdP JWKS"]
+    assert repaired["confidence_note"] == "medium"
+
+    diag = Diagnosis.model_validate(partial)
+    assert diag.primary_hypothesis.cause == "JWT validation failures"
+    assert diag.confidence_note == "medium"
+
+
+def test_diagnosis_repairs_from_secondary_when_no_categories():
+    diag = Diagnosis.model_validate(
+        {
+            "secondary_hypotheses": [
+                {"cause": "SMTP relay down", "confidence": 55, "evidence": "421"}
+            ]
+        }
+    )
+    assert diag.primary_hypothesis.cause == "SMTP relay down"
+    assert diag.blast_radius_assessment == "none identified"
+    assert diag.confidence_note == "medium"
+
+
+def test_diagnosis_normalizes_confidence_note_case():
+    diag = Diagnosis.model_validate(
+        {
+            "primary_hypothesis": {"cause": "x", "confidence": 50},
+            "confidence_note": "HIGH",
+        }
+    )
+    assert diag.confidence_note == "high"
