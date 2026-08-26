@@ -34,6 +34,7 @@ Additional documentation:
 | [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
+| [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |
 | [docs/TESTING.md](docs/TESTING.md) | Operator E2E: smoke-test, remote rule-path, runbook-e2e wrappers; host vs agent ownership |
 | [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
 | [eval/README.md](eval/README.md) | Blind eval and routing replay: how cases are scored offline |

@@ -81,6 +81,10 @@ diag validate -w examples/hello-world
 
 Safety invariants (do not weaken): hypotheses only, synthetic/redacted eval data, evidence citing. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Which test layers exist, what each proves, and which gate they belong to:
+[TESTING_STRATEGY.md](TESTING_STRATEGY.md). Operator commands for a deployed
+agent: [TESTING.md](TESTING.md).
+
 Every commit must be **DCO signed**: `git commit -s`.
 
 ---

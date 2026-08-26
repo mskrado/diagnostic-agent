@@ -4,6 +4,10 @@ Golden **operator E2E tooling** lives in this repository. Host projects (for
 example publishi.ai) keep only thin wrappers or compose/workspace wiring — not
 duplicate smoke-script bodies.
 
+This page is the **command reference**. For which test layers exist, what each
+one proves, what must be configured, and which are safe against production, read
+[TESTING_STRATEGY.md](TESTING_STRATEGY.md) first.
+
 Related:
 
 | Tool | Purpose |
