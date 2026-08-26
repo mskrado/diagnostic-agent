@@ -22,8 +22,12 @@ gh issue create --title "[area] short description" \
 ```bash
 git checkout devel && git pull && git checkout -b feature/<slug>-<issue>
 gh pr create --draft --base devel --head feature/<slug>-<issue> \
-  --title "[area] description (#<issue>)" --body "Closes #<issue>"
+  --title "[area] description (#<issue>)" \
+  --label "type:feature,area:core" \
+  --body "Closes #<issue>"
 ```
+
+Copy the issue’s `type:*` / `area:*` onto the PR (release notes read **PR** labels). Use `ignore-for-release` instead of `type:*` for changelog / chore noise.
 
 4. **Branch names include the issue number.** Feature (and `fix/` / `perf/`) branches **must** end with `-<issue>` (e.g. `feature/sdlc-guide-9`, `fix/redaction-12`). Do not create `feature/<slug>` without the issue suffix.
 5. **Print a session summary before starting work (mandatory for agents).** After the issue exists (and the draft PR / branch when available), and **before** making code or docs changes, print this block:
@@ -36,7 +40,7 @@ gh pr create --draft --base devel --head feature/<slug>-<issue> \
 
     If the draft PR is not open yet, print **Draft PR** as `(creating…)` and update/reprint once `gh pr create` returns. Re-print when resuming an existing issue/PR mid-session.
 6. **Branch targets.** Feature PRs merge to **`devel` only**. **`main` receives merges from `devel` only** (release PR behind a Release Checklist issue). Do not retarget a feature PR to `main` to skip integration.
-7. **Always link.** PR title contains `(#<issue>)`; body contains `Closes #<issue>` (or `Refs #` for partial work). Fill the PR template. **DCO:** every commit must use `git commit -s`.
+7. **Always link.** PR title contains `(#<issue>)`; body contains `Closes #<issue>` (or `Refs #` for partial work). Fill the PR template. Apply `--label "type:…,area:…"` (or `ignore-for-release`) on create so release-notes hygiene does not warn. **DCO:** every commit must use `git commit -s`.
 8. **Wait for green CI.** Never request merge on red (`ci.yml`, `dco.yml`).
 
 ```bash

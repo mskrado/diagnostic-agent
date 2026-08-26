@@ -81,6 +81,10 @@ diag validate -w examples/hello-world
 
 Safety invariants (do not weaken): hypotheses only, synthetic/redacted eval data, evidence citing. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Which test layers exist, what each proves, and which gate they belong to:
+[TESTING_STRATEGY.md](TESTING_STRATEGY.md). Operator commands for a deployed
+agent: [TESTING.md](TESTING.md).
+
 Every commit must be **DCO signed**: `git commit -s`.
 
 ---
@@ -116,7 +120,7 @@ feature/sdlc-guide-9 ───────────────────�
 ### PR workflow
 
 1. Create `feature/<short-slug>-<issue>` from **`devel`** (issue number **required**).
-2. Open a **draft PR early** with **base `devel`**.
+2. Open a **draft PR early** with **base `devel`**, and apply **PR labels at create time** (at least one `type:*`, plus `area:*` as appropriate). See [§5 Step 4](#5-requirements--issue-workflow).
 3. CI (`ci.yml` + `dco.yml`) must be green.
 4. Squash-merge to `devel` and delete the branch.
 5. For a published release: open a **Release Checklist** issue and PR **`devel` → `main`** with a feature-PR inventory (prefer `scripts/open-release-pr.ps1`).
@@ -146,6 +150,7 @@ gh label create "type:feature"   --color 1d76db --description "New capability"
 gh label create "type:bug"       --color d73a4a --description "Defect"
 gh label create "type:tech-debt" --color fbca04 --description "Refactor/maintenance"
 gh label create "type:docs"      --color 0075ca --description "Documentation"
+gh label create "ignore-for-release" --color cfd3d7 --description "Omit from release notes / CHANGELOG"
 gh label create "area:core"      --color 5319e7 --description "Agent runtime / tools"
 gh label create "area:corpus"    --color 5319e7 --description "Runbooks, scenarios, blind-eval"
 gh label create "area:install"   --color 5319e7 --description "diag install / discovery"
@@ -178,10 +183,13 @@ git push -u origin HEAD
 gh issue edit <issue> --add-label "status:in-progress"
 gh pr create --draft --base devel --head feature/<slug>-<issue> \
   --title "[area] description (#<issue>)" \
+  --label "type:feature,area:core" \
   --body "Closes #<issue>"
 ```
 
-**Step 5 — Verify.** Fill the PR template. `gh pr ready` then `gh pr checks --watch`.
+Copy the issue’s `type:*` / `area:*` onto the PR (example above). Release notes categorize **PR** labels, not issue labels — missing `type:*` lands the PR under “Other Changes” (`ci.yml` posts an advisory). Use `ignore-for-release` instead of `type:*` for changelog / chore noise.
+
+**Step 5 — Verify.** Fill the PR template. Confirm the PR has a release-category label (`type:*` or `ignore-for-release`). `gh pr ready` then `gh pr checks --watch`.
 
 **Step 6 — Ship feature.** Squash-merge into **`devel`**. `Closes #` is closed by `close-issues-on-devel-merge.yml` (native GitHub close-on-default-branch does not apply to `devel`).
 
@@ -307,7 +315,7 @@ Cursor agents follow the same contract via `.cursor/rules/requirements-workflow.
    | **Branch** | `feature/<slug>-<n>` |
 
 5. **Feature PRs target `devel` only.** `main` receives merges from `devel` only.
-6. **Always link.** Title `(#n)`; body `Closes #n` (or `Refs #n`).
+6. **Always link.** Title `(#n)`; body `Closes #n` (or `Refs #n`). On `gh pr create`, pass `--label "type:…,area:…"` (or `ignore-for-release`) so release notes can categorize the PR.
 7. **Wait for green CI.** Never request merge on red.
 8. **Do not self-merge** protected branches; request review.
 9. **Record release impact** in the PR (image/PyPI publish needed? host pin bump?).

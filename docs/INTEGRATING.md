@@ -199,6 +199,9 @@ Then exercise the scenarios end to end:
 docker compose exec diagnostic-agent diag e2e --url http://localhost:8000
 ```
 
+For full operator smoke / remote rule-path / runbook wrappers (and what stays
+host-owned vs agent-owned), see **[TESTING.md](TESTING.md)**.
+
 ## 6. Guard the workspace in CI
 
 Neither check needs LLM credentials or a running stack, so both belong on every
