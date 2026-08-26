@@ -34,6 +34,7 @@ Additional documentation:
 | [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
+| [docs/TESTING.md](docs/TESTING.md) | Operator E2E: smoke-test, remote rule-path, runbook-e2e wrappers; host vs agent ownership |
 | [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
 | [eval/README.md](eval/README.md) | Blind eval and routing replay: how cases are scored offline |
 | [docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md) | Execution design: threat model, invariants, sandbox/classifier contracts, implementation status |
@@ -295,6 +296,9 @@ image rather than writing their own scripts.
 | `diag eval blind` | Score LLM root-cause identification against the workspace dataset |
 | `diag replay` | Replay scenarios through the routing logic and score route decisions — no LLM, no stack ([eval/README.md](eval/README.md#routing-replay-eval-diag-replay)) |
 | `diag serve` | Run the `/alert` webhook server |
+
+Operator wrappers for host stacks (smoke, remote rule-path, runbook e2e) live
+under [`scripts/`](scripts/) — see [docs/TESTING.md](docs/TESTING.md).
 
 ## Develop
 
