@@ -69,8 +69,13 @@ install collection, and workspace resolution.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q
+python -m pytest -q
 ```
+
+Prefer `python -m pytest` over bare `pytest`. On Windows (and some user-site
+`pip install` layouts), the `pytest` console script is often missing from
+`PATH` even though the package is installed — `python -m pytest` always works
+when that same `python` can import pytest.
 
 Configure: nothing. `tests/conftest.py` pins the bundled
 `examples/spring-modular-monolith` profile so tests do not depend on a host
@@ -407,7 +412,7 @@ on *every* pull request that touches a workspace — including host repos.
 
 | Layer | Pass criteria |
 |---|---|
-| L1 | `pytest -q` exits 0 |
+| L1 | `python -m pytest -q` exits 0 |
 | L2 | `diag validate` exits 0; redaction rule count as expected |
 | L3 | `diag lint` exits 0 |
 | L4 | `pass_rate` 1.0 (any failure is a real routing regression) |
