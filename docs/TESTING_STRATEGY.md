@@ -69,8 +69,17 @@ install collection, and workspace resolution.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q
+python -m pytest -q
 ```
+
+Prefer module forms over bare console scripts. On Windows (and some user-site
+`pip install` layouts), `pytest` / `diag` are often missing from `PATH` even
+though the package is installed:
+
+| Wanted | Reliable form |
+|---|---|
+| `pytest …` | `python -m pytest …` |
+| `diag …` | `python -m app.cli …` |
 
 Configure: nothing. `tests/conftest.py` pins the bundled
 `examples/spring-modular-monolith` profile so tests do not depend on a host
@@ -87,7 +96,7 @@ profile/preset resolution chain, that redaction resolves to ≥1 rule
 and that the service topology parses.
 
 ```bash
-diag validate -w examples/hello-world
+python -m app.cli validate -w examples/hello-world
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<pinned-tag> diag validate
 ```
@@ -102,8 +111,8 @@ grounding (expected keywords actually appear in the case's injected logs), and
 the hypotheses-only framing invariant.
 
 ```bash
-diag lint
-diag lint -w /path/to/host/workspace
+python -m app.cli lint
+python -m app.cli lint -w /path/to/host/workspace
 ```
 
 Configure: workspace with `runbooks/`, `scenarios.yaml`, and (optionally) a blind
@@ -118,8 +127,8 @@ is forced on for the run and restored after, so results do not depend on
 `AGENT_ROUTING_ENABLED`.
 
 ```bash
-diag replay
-diag replay --only redis-connection-errors
+python -m app.cli replay
+python -m app.cli replay --only redis-connection-errors
 ```
 
 Configure: `scenarios.yaml`, optionally with a `replay:` block pinning
@@ -407,9 +416,9 @@ on *every* pull request that touches a workspace — including host repos.
 
 | Layer | Pass criteria |
 |---|---|
-| L1 | `pytest -q` exits 0 |
-| L2 | `diag validate` exits 0; redaction rule count as expected |
-| L3 | `diag lint` exits 0 |
+| L1 | `python -m pytest -q` exits 0 |
+| L2 | `python -m app.cli validate` exits 0; redaction rule count as expected |
+| L3 | `python -m app.cli lint` exits 0 |
 | L4 | `pass_rate` 1.0 (any failure is a real routing regression) |
 | L5 | Every probe reachable, or a deliberate, documented skip |
 | L6 | No regression versus the previous run: `identified_accuracy`, `mean_keyword_recall`, `mean_judge_score`; `no-signal-control` still low-confidence |
