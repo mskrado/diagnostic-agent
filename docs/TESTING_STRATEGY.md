@@ -72,10 +72,14 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-Prefer `python -m pytest` over bare `pytest`. On Windows (and some user-site
-`pip install` layouts), the `pytest` console script is often missing from
-`PATH` even though the package is installed — `python -m pytest` always works
-when that same `python` can import pytest.
+Prefer module forms over bare console scripts. On Windows (and some user-site
+`pip install` layouts), `pytest` / `diag` are often missing from `PATH` even
+though the package is installed:
+
+| Wanted | Reliable form |
+|---|---|
+| `pytest …` | `python -m pytest …` |
+| `diag …` | `python -m app.cli …` |
 
 Configure: nothing. `tests/conftest.py` pins the bundled
 `examples/spring-modular-monolith` profile so tests do not depend on a host
@@ -92,7 +96,7 @@ profile/preset resolution chain, that redaction resolves to ≥1 rule
 and that the service topology parses.
 
 ```bash
-diag validate -w examples/hello-world
+python -m app.cli validate -w examples/hello-world
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<pinned-tag> diag validate
 ```
@@ -107,8 +111,8 @@ grounding (expected keywords actually appear in the case's injected logs), and
 the hypotheses-only framing invariant.
 
 ```bash
-diag lint
-diag lint -w /path/to/host/workspace
+python -m app.cli lint
+python -m app.cli lint -w /path/to/host/workspace
 ```
 
 Configure: workspace with `runbooks/`, `scenarios.yaml`, and (optionally) a blind
@@ -123,8 +127,8 @@ is forced on for the run and restored after, so results do not depend on
 `AGENT_ROUTING_ENABLED`.
 
 ```bash
-diag replay
-diag replay --only redis-connection-errors
+python -m app.cli replay
+python -m app.cli replay --only redis-connection-errors
 ```
 
 Configure: `scenarios.yaml`, optionally with a `replay:` block pinning
