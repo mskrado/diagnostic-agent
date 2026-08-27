@@ -417,8 +417,8 @@ on *every* pull request that touches a workspace — including host repos.
 | Layer | Pass criteria |
 |---|---|
 | L1 | `python -m pytest -q` exits 0 |
-| L2 | `diag validate` exits 0; redaction rule count as expected |
-| L3 | `diag lint` exits 0 |
+| L2 | `python -m app.cli validate` exits 0; redaction rule count as expected |
+| L3 | `python -m app.cli lint` exits 0 |
 | L4 | `pass_rate` 1.0 (any failure is a real routing regression) |
 | L5 | Every probe reachable, or a deliberate, documented skip |
 | L6 | No regression versus the previous run: `identified_accuracy`, `mean_keyword_recall`, `mean_judge_score`; `no-signal-control` still low-confidence |
