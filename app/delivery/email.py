@@ -6,17 +6,21 @@ finishes correlating metrics/logs and includes the structured diagnosis.
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from html import escape
 
 from ..config import settings
+from .audit import build_audit_record, redact_audit_json
 from .redact import redact_log_lines, redact_text
 
 logger = logging.getLogger(__name__)
 
 _MAX_LOG_LINES_IN_EMAIL = 10
+_SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _format_log_source(log_source: dict) -> list[str]:
@@ -642,8 +646,18 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
     return subject, plain, html
 
 
-def deliver_email(report: dict, alert: dict | None = None) -> bool:
-    """Send a tenant-redacted diagnostic email. Returns True on success."""
+def deliver_email(
+    report: dict,
+    alert: dict | None = None,
+    *,
+    llm_raw: str = "",
+) -> bool:
+    """Send a tenant-redacted diagnostic email. Returns True on success.
+
+    When ``AGENT_EMAIL_ATTACH_AUDIT`` is true (default), attaches the same
+    redacted audit JSON written to the audit JSONL (``llm_raw``, prompts,
+    report). Oversized payloads are skipped; the email still sends.
+    """
     if not settings.email_enabled:
         logger.info("email delivery disabled (AGENT_EMAIL_ENABLED=false)")
         return False
@@ -654,12 +668,21 @@ def deliver_email(report: dict, alert: dict | None = None) -> bool:
         return False
 
     subject, plain, html = format_diagnosis_email(report, alert)
-    msg = MIMEMultipart("alternative")
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(plain, "plain", "utf-8"))
+    alt.attach(MIMEText(html, "html", "utf-8"))
+
+    attachment = _maybe_audit_attachment(report, alert, llm_raw)
+    if attachment is None:
+        msg = alt
+    else:
+        msg = MIMEMultipart("mixed")
+        msg.attach(alt)
+        msg.attach(attachment)
+
     msg["Subject"] = subject
     msg["From"] = settings.smtp_from
     msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(plain, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
 
     try:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=settings.smtp_timeout) as smtp:
@@ -673,3 +696,51 @@ def deliver_email(report: dict, alert: dict | None = None) -> bool:
     except OSError as exc:
         logger.warning("diagnostic email failed: %s", exc)
         return False
+
+
+def _maybe_audit_attachment(
+    report: dict,
+    alert: dict | None,
+    llm_raw: str,
+) -> MIMEApplication | None:
+    """Build a redacted audit JSON attachment, or None when disabled/oversized."""
+    if not settings.email_attach_audit:
+        return None
+
+    payload = redact_audit_json(build_audit_record(report, llm_raw))
+    max_bytes = max(0, int(settings.email_attach_audit_max_bytes))
+    payload_bytes = payload.encode("utf-8")
+    if max_bytes and len(payload_bytes) > max_bytes:
+        logger.warning(
+            "audit email attachment skipped: %s bytes > "
+            "AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES=%s",
+            len(payload_bytes),
+            max_bytes,
+        )
+        return None
+
+    filename = _audit_attachment_filename(report, alert)
+    part = MIMEApplication(payload_bytes, Name=filename)
+    part["Content-Disposition"] = f'attachment; filename="{filename}"'
+    part["Content-Type"] = f'application/json; name="{filename}"'
+    logger.info(
+        "diagnostic email will include audit attachment %s (%s bytes)",
+        filename,
+        len(payload_bytes),
+    )
+    return part
+
+
+def _audit_attachment_filename(report: dict, alert: dict | None) -> str:
+    from datetime import datetime, timezone
+
+    labels = (alert or {}).get("labels") or {}
+    alert_name = (
+        report.get("alert_type")
+        or labels.get("alertname")
+        or "alert"
+    )
+    service = report.get("service") or labels.get("service") or "service"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    raw = f"diagnostic-audit-{service}-{alert_name}-{ts}.json"
+    return _SAFE_FILENAME.sub("_", raw)

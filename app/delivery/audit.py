@@ -35,37 +35,47 @@ def _llm_context_from_report(report: dict) -> dict[str, Any]:
     }
 
 
-def write_audit_record(report: dict, llm_raw: str) -> str | None:
-    """Append a redacted audit record; return the file path written, or None.
+def build_audit_record(report: dict, llm_raw: str) -> dict[str, Any]:
+    """Build the pre-redaction audit object (also used for email attachments).
 
-    Top-level fields mirror the report for easy jq access:
+    Top-level fields mirror the report for easy jq / attachment access:
 
     - ``llm_raw`` — full model output (text and/or ToolUse JSON)
     - ``llm_context`` — retrieval context only (RAG)
     - ``llm_exchange`` — prompts + token usage + model ids
     """
+    exchange = report.get("llm_exchange") or {}
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "agent_version": _version(),
+        "chat_provider": settings.chat_provider,
+        "chat_model": settings.chat_model,
+        "embed_provider": settings.embed_provider,
+        "embed_model": settings.embed_model,
+        "llm_exchange": exchange,
+        "llm_context": _llm_context_from_report(report),
+        "llm_raw": llm_raw,
+        "report": report,
+    }
+
+
+def redact_audit_json(record: dict[str, Any]) -> str:
+    """Serialize and redact an audit record for disk / email."""
+    return redact_text(json.dumps(record, default=str))
+
+
+def write_audit_record(report: dict, llm_raw: str) -> str | None:
+    """Append a redacted audit record; return the file path written, or None."""
     try:
         os.makedirs(settings.audit_log_dir, exist_ok=True)
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = os.path.join(settings.audit_log_dir, f"diagnostics-{day}.jsonl")
-        exchange = report.get("llm_exchange") or {}
-        llm_context = _llm_context_from_report(report)
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "agent_version": _version(),
-            "chat_provider": settings.chat_provider,
-            "chat_model": settings.chat_model,
-            "embed_provider": settings.embed_provider,
-            "embed_model": settings.embed_model,
-            "llm_exchange": exchange,
-            "llm_context": llm_context,
-            "llm_raw": llm_raw,
-            "report": report,
-        }
-        line = redact_text(json.dumps(record, default=str))
+        record = build_audit_record(report, llm_raw)
+        line = redact_audit_json(record)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        usage = exchange.get("token_usage") or {}
+        usage = (record.get("llm_exchange") or {}).get("token_usage") or {}
+        llm_context = record.get("llm_context") or {}
         logger.info(
             "audit record written: %s tokens_in=%s tokens_out=%s tokens_total=%s "
             "rag_used=%s llm_raw_chars=%d",

@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     email_enabled: bool = True
     email_to: str = "dev-alerts@localhost"
     email_subject_prefix: str = "diagnostic"
+    # Attach the redacted audit JSON (llm_raw + prompts) to each diagnostic email.
+    # Default ON so operators can inspect incomplete LLM output from Mailpit/inbox
+    # without SSHing to /app/audit. Set false to keep plain+html only.
+    email_attach_audit: bool = True
+    # Skip the attachment (email still sends) when the redacted JSON exceeds this.
+    email_attach_audit_max_bytes: int = 262144
     smtp_host: str = "mailpit"
     smtp_port: int = 1025
     smtp_from: str = "diagnostic-agent@localhost"

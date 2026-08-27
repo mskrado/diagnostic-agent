@@ -382,6 +382,8 @@ Separate from Alertmanager’s own email notifier. This is the agent’s
 | Email enabled | `AGENT_EMAIL_ENABLED` | Optional (default off unless Mailpit found) | Turn on report delivery |
 | SMTP host / port | `AGENT_SMTP_HOST` / `AGENT_SMTP_PORT` | If email on | Relay for outbound mail |
 | From / To | `AGENT_SMTP_FROM` / `AGENT_EMAIL_TO` | If email on | Envelope addresses |
+| Attach audit JSON | `AGENT_EMAIL_ATTACH_AUDIT` | Optional (default **on**) | Redacted `llm_raw` + prompts as `.json` attachment; set `false` for body-only |
+| Attach size cap | `AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES` | Optional (`262144`) | Skip attachment if redacted JSON exceeds this; email still sends |
 | Username / password / STARTTLS | `AGENT_SMTP_*` | If relay requires auth | Credentials |
 
 **Auto:** if **Mailpit** is discovered (HTTP UI on `:8025` and/or Docker

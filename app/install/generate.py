@@ -330,6 +330,8 @@ def _env_file(params: InstallParams) -> str:
         "AGENT_RAG_ENABLED=true",
         f"AGENT_EMAIL_ENABLED={str(params.email_enabled).lower()}",
         f"AGENT_EMAIL_TO={params.email_to}",
+        "AGENT_EMAIL_ATTACH_AUDIT=true",
+        "AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES=262144",
         f"AGENT_SMTP_HOST={params.smtp_host}",
         f"AGENT_SMTP_PORT={params.smtp_port}",
         f"AGENT_SMTP_FROM={params.smtp_from}",

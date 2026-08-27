@@ -109,6 +109,6 @@ class DiagnosticAgent:
 
         write_audit_record(report, final.get("llm_raw", ""))
         deliver_annotation(self.grafana, report)
-        deliver_email(report, alert)
+        deliver_email(report, alert, llm_raw=final.get("llm_raw", ""))
         deliver_slack(report, alert)
         return report
