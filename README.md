@@ -274,6 +274,8 @@ Every switch here defaults to off, so enabling them is always a deliberate act.
 | `AGENT_AUDIT_LOG_DIR` | `<repo>/audit` | JSONL audit records, one per diagnosis |
 | `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Needs `AGENT_GRAFANA_TOKEN` |
 | `AGENT_EMAIL_ENABLED` | `true` | With `AGENT_EMAIL_TO` and the `AGENT_SMTP_*` settings |
+| `AGENT_EMAIL_ATTACH_AUDIT` | `true` | Attach redacted audit JSON (`llm_raw` + prompts) to each diagnostic email; set `false` for body-only |
+| `AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES` | `262144` | Skip the attachment (email still sends) when the redacted JSON exceeds this size |
 | `AGENT_SLACK_ENABLED` | `false` | Posts the reasoning trace; needs `AGENT_SLACK_WEBHOOK_URL`. Optional `AGENT_SLACK_CHANNEL`, `AGENT_SLACK_USERNAME` |
 | `AGENT_PAGERDUTY_ENABLED` | `false` | Needs `AGENT_PAGERDUTY_API_TOKEN` and `AGENT_PAGERDUTY_FROM_EMAIL`; `AGENT_PAGERDUTY_SERVICE_ID` to open incidents |
 

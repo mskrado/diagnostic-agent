@@ -282,6 +282,12 @@ def test_deliver_email_sends_via_smtp():
             "primary_hypothesis": {"cause": "test cause", "confidence": 50},
         },
         "evidence": {"rag_used": False, "metrics": {}},
+        "llm_exchange": {
+            "system_prompt": "sys",
+            "user_prompt": "user",
+            "rag_used": False,
+            "token_usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        },
     }
     mock_smtp = MagicMock()
     mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
@@ -293,6 +299,55 @@ def test_deliver_email_sends_via_smtp():
         mock_settings.email_enabled = True
         mock_settings.email_to = "dev-alerts@localhost"
         mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_attach_audit = True
+        mock_settings.email_attach_audit_max_bytes = 262144
+        mock_settings.smtp_host = "mailpit"
+        mock_settings.smtp_port = 1025
+        mock_settings.smtp_from = "diagnostic-agent@publishi.local"
+        mock_settings.smtp_username = ""
+        mock_settings.smtp_password = ""
+        mock_settings.smtp_starttls = False
+        mock_settings.smtp_timeout = 15.0
+        mock_settings.chat_provider = "bedrock_converse"
+        mock_settings.chat_model = "amazon.nova-micro-v1:0"
+        mock_settings.embed_provider = "bedrock"
+        mock_settings.embed_model = "amazon.titan-embed-text-v2:0"
+
+        assert deliver_email(report, llm_raw='{"primary_hypothesis":{}}') is True
+
+    mock_smtp.sendmail.assert_called_once()
+    recipients = mock_smtp.sendmail.call_args[0][1]
+    assert recipients == ["dev-alerts@localhost"]
+    raw_msg = mock_smtp.sendmail.call_args[0][2]
+    assert "application/json" in raw_msg
+    assert "diagnostic-audit-" in raw_msg
+    assert "Content-Disposition: attachment" in raw_msg
+    assert "base64" in raw_msg.lower()
+
+
+def test_deliver_email_skips_attachment_when_disabled():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "warning",
+        "blast_radius": [],
+        "diagnosis": {
+            "primary_hypothesis": {"cause": "test cause", "confidence": 50},
+        },
+        "evidence": {"rag_used": False, "metrics": {}},
+    }
+    mock_smtp = MagicMock()
+    mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
+    mock_smtp.__exit__ = MagicMock(return_value=False)
+
+    with patch("app.delivery.email.settings") as mock_settings, patch(
+        "app.delivery.email.smtplib.SMTP", return_value=mock_smtp
+    ):
+        mock_settings.email_enabled = True
+        mock_settings.email_to = "dev-alerts@localhost"
+        mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_attach_audit = False
+        mock_settings.email_attach_audit_max_bytes = 262144
         mock_settings.smtp_host = "mailpit"
         mock_settings.smtp_port = 1025
         mock_settings.smtp_from = "diagnostic-agent@publishi.local"
@@ -301,8 +356,51 @@ def test_deliver_email_sends_via_smtp():
         mock_settings.smtp_starttls = False
         mock_settings.smtp_timeout = 15.0
 
-        assert deliver_email(report) is True
+        assert deliver_email(report, llm_raw="secret-raw") is True
 
-    mock_smtp.sendmail.assert_called_once()
-    recipients = mock_smtp.sendmail.call_args[0][1]
-    assert recipients == ["dev-alerts@localhost"]
+    raw_msg = mock_smtp.sendmail.call_args[0][2]
+    assert "Content-Disposition: attachment" not in raw_msg
+    assert "secret-raw" not in raw_msg
+
+
+def test_deliver_email_skips_oversized_attachment():
+    report = {
+        "service": "platform-service",
+        "alert_type": "HighErrorRate",
+        "severity": "warning",
+        "blast_radius": [],
+        "diagnosis": {
+            "primary_hypothesis": {"cause": "test cause", "confidence": 50},
+        },
+        "evidence": {"rag_used": False, "metrics": {}},
+        "llm_exchange": {"user_prompt": "x" * 1000},
+    }
+    mock_smtp = MagicMock()
+    mock_smtp.__enter__ = MagicMock(return_value=mock_smtp)
+    mock_smtp.__exit__ = MagicMock(return_value=False)
+
+    with patch("app.delivery.email.settings") as mock_settings, patch(
+        "app.delivery.email.smtplib.SMTP", return_value=mock_smtp
+    ):
+        mock_settings.email_enabled = True
+        mock_settings.email_to = "dev-alerts@localhost"
+        mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_attach_audit = True
+        mock_settings.email_attach_audit_max_bytes = 64
+        mock_settings.smtp_host = "mailpit"
+        mock_settings.smtp_port = 1025
+        mock_settings.smtp_from = "diagnostic-agent@publishi.local"
+        mock_settings.smtp_username = ""
+        mock_settings.smtp_password = ""
+        mock_settings.smtp_starttls = False
+        mock_settings.smtp_timeout = 15.0
+        mock_settings.chat_provider = "ollama"
+        mock_settings.chat_model = "mistral"
+        mock_settings.embed_provider = "ollama"
+        mock_settings.embed_model = "nomic"
+
+        assert deliver_email(report, llm_raw="raw") is True
+
+    raw_msg = mock_smtp.sendmail.call_args[0][2]
+    assert "Content-Disposition: attachment" not in raw_msg
+    assert mock_smtp.sendmail.called

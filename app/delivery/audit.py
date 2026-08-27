@@ -11,11 +11,34 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 
 from ..config import settings
 from .redact import redact_text
 
 logger = logging.getLogger(__name__)
+
+
+def build_audit_record(report: dict, llm_raw: str) -> dict[str, Any]:
+    """Build the pre-redaction audit object (also used for email attachments)."""
+    exchange = report.get("llm_exchange") or {}
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "agent_version": _version(),
+        "chat_provider": settings.chat_provider,
+        "chat_model": settings.chat_model,
+        "embed_provider": settings.embed_provider,
+        "embed_model": settings.embed_model,
+        # Easy retrieval: prompts + tokens at the top level
+        "llm_exchange": exchange,
+        "llm_raw": llm_raw,
+        "report": report,
+    }
+
+
+def redact_audit_json(record: dict[str, Any]) -> str:
+    """Serialize and redact an audit record for disk / email."""
+    return redact_text(json.dumps(record, default=str))
 
 
 def write_audit_record(report: dict, llm_raw: str) -> str | None:
@@ -28,23 +51,11 @@ def write_audit_record(report: dict, llm_raw: str) -> str | None:
         os.makedirs(settings.audit_log_dir, exist_ok=True)
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = os.path.join(settings.audit_log_dir, f"diagnostics-{day}.jsonl")
-        exchange = report.get("llm_exchange") or {}
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "agent_version": _version(),
-            "chat_provider": settings.chat_provider,
-            "chat_model": settings.chat_model,
-            "embed_provider": settings.embed_provider,
-            "embed_model": settings.embed_model,
-            # Easy retrieval: prompts + tokens at the top level
-            "llm_exchange": exchange,
-            "llm_raw": llm_raw,
-            "report": report,
-        }
-        line = redact_text(json.dumps(record, default=str))
+        record = build_audit_record(report, llm_raw)
+        line = redact_audit_json(record)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        usage = exchange.get("token_usage") or {}
+        usage = (record.get("llm_exchange") or {}).get("token_usage") or {}
         logger.info(
             "audit record written: %s tokens_in=%s tokens_out=%s tokens_total=%s "
             "rag_used=%s",
@@ -52,7 +63,7 @@ def write_audit_record(report: dict, llm_raw: str) -> str | None:
             usage.get("input_tokens"),
             usage.get("output_tokens"),
             usage.get("total_tokens"),
-            exchange.get("rag_used"),
+            (record.get("llm_exchange") or {}).get("rag_used"),
         )
         return path
     except OSError as exc:
