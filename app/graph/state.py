@@ -25,7 +25,7 @@ class DiagnosticState(TypedDict, total=False):
 
     # --- correlate ---
     hypotheses: dict      # parsed JSON from the LLM
-    llm_raw: str          # raw LLM text (kept for audit)
+    llm_raw: str          # full model output for audit (text and/or ToolUse JSON)
     llm_system_prompt: str
     llm_user_prompt: str
     llm_token_usage: dict  # input/output/total when provider reports them
