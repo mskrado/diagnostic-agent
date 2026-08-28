@@ -12,9 +12,15 @@ in your own repository — and the published agent does the rest.
 2. [Create a workspace](#2-create-a-workspace)
 3. [Wire Alertmanager](#3-wire-alertmanager)
 4. [Docker Compose snippet](#4-docker-compose-snippet)
-5. [Verify](#5-verify)
-6. [Guard the workspace in CI](#6-guard-the-workspace-in-ci)
-7. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
+5. [Standalone process (`diag serve`)](#5-standalone-process-diag-serve)
+6. [Verify](#6-verify)
+7. [Guard the workspace in CI](#7-guard-the-workspace-in-ci)
+8. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
+
+Prefer **[INSTALL.md](INSTALL.md)** when you want discovery to generate the
+bundle, including [remote deploy](INSTALL.md#deploy-the-install-bundle-to-a-remote-host)
+and [Docker vs standalone runtime](INSTALL.md#run-the-agent-docker-image-or-standalone-process).
+This page is the manual wiring path.
 
 ---
 
@@ -184,7 +190,26 @@ services:
 The image sets `AGENT_WORKSPACE=/workspace`, so the mount is the only wiring
 needed — no profile or runbook paths to keep in sync.
 
-## 5. Verify
+Full remote-copy and Compose / `docker run` recipes:
+[INSTALL.md — Run the agent](INSTALL.md#run-the-agent-docker-image-or-standalone-process).
+
+## 5. Standalone process (`diag serve`)
+
+```bash
+pip install diagnostic-agent
+export AGENT_WORKSPACE=/path/to/infrastructure/diagnostic-agent
+# Load AGENT_* / SDK credentials (same names as Compose env)
+set -a && source /path/to/agent.env && set +a
+diag serve --host 0.0.0.0 --port 8000
+```
+
+Use host-reachable Prometheus/Loki URLs (often `http://127.0.0.1:9090`), not
+Docker DNS names, unless this process shares the container network namespace.
+Point Alertmanager’s webhook at this host:port. See
+[INSTALL.md](INSTALL.md#c-standalone-process-pip--diag-serve) for systemd and
+writable audit/Chroma paths.
+
+## 6. Verify
 
 ```bash
 curl http://localhost:8001/health
@@ -205,7 +230,7 @@ docker compose exec diagnostic-agent diag e2e --url http://localhost:8000
 For full operator smoke / remote rule-path / runbook wrappers (and what stays
 host-owned vs agent-owned), see **[TESTING.md](TESTING.md)**.
 
-## 6. Guard the workspace in CI
+## 7. Guard the workspace in CI
 
 Neither check needs LLM credentials or a running stack, so both belong on every
 pull request that touches the workspace:
