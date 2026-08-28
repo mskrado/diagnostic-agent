@@ -31,7 +31,7 @@ Additional documentation:
 
 | Document | Covers |
 |---|---|
-| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
+| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: parameters, generated files, **remote bundle deploy**, Docker image vs standalone `diag serve`, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
 | [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |

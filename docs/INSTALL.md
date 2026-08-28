@@ -10,10 +10,12 @@ diag install --output ./deploy
 ```
 
 This guide covers **interactive** and **non-interactive** modes, every parameter
-that is collected (why it exists, required vs optional), examples, and what to
-do after generation.
+that is collected (why it exists, required vs optional), examples, what to do
+after generation, **how to deploy the bundle to a remote host**, and how to run
+the agent as a **Docker image** or a **standalone `diag serve` process**.
 
-Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
+Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
+[TESTING.md](TESTING.md)
 
 ---
 
@@ -26,10 +28,12 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md)
 5. [Parameters collected (full reference)](#parameters-collected-full-reference)
 6. [What gets generated](#what-gets-generated)
 7. [After install](#after-install)
-8. [Graceful degradation](#graceful-degradation)
-9. [Troubleshooting](#troubleshooting)
-10. [Requirements](#requirements)
-11. [Quick recipe card](#quick-recipe-card)
+8. [Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)
+9. [Run the agent (Docker image or standalone process)](#run-the-agent-docker-image-or-standalone-process)
+10. [Graceful degradation](#graceful-degradation)
+11. [Troubleshooting](#troubleshooting)
+12. [Requirements](#requirements)
+13. [Quick recipe card](#quick-recipe-card)
 
 ---
 
@@ -477,12 +481,15 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
    - Merge Alertmanager route/receiver → reload
    - Align Promtail/Loki `service=` labels with the service map
    - Mint Grafana token if you want annotations
-3. **Start** the agent:
+3. **Start** the agent (same host as the bundle):
    ```bash
    cd deploy/agent && docker compose --env-file .env up -d
    curl -sf http://127.0.0.1:8001/health
    ```
-   Or re-run with `--start`.
+   Or re-run with `--start`. For a **remote** runtime host, copy the bundle
+   first ([Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)),
+   then start via Compose, `docker run`, or standalone `diag serve`
+   ([Run the agent](#run-the-agent-docker-image-or-standalone-process)).
 4. **Validate / lint / eval** — copy-paste from `APPLY.md` § Testing, or:
 
    ```bash
@@ -512,6 +519,271 @@ Re-running `diag install --output ./deploy` is safe:
 - Differing content → timestamped `*.bak.<utc>` backup, then replace  
 - Use `--dry-run` first in production change windows  
 
+`diag install` is a **generator**. It does not have to run on the machine that
+will host the agent. Discovery can target a remote stack (`--target` /
+`--ssh`); the written bundle is then copied to the runtime host (next section)
+or kept local for Compose on the same box.
+
+---
+
+## Deploy the install bundle to a remote host
+
+Use this when you generated the bundle on a laptop/CI and the agent should run
+on another machine (ops VM, EC2, bastion next to Prom/Loki).
+
+### What to copy
+
+| Path under `--output` | Copy? | Notes |
+|---|---|---|
+| `agent/workspace/` | **Yes** | Profiles, runbooks, `agent.yaml` — bind-mounted at `/workspace` |
+| `agent/docker-compose.yml` | **Yes** (Docker runtime) | Or recreate an equivalent Compose / `docker run` |
+| `agent/.env` | **Yes, carefully** | Contains secrets. Prefer copying a template and filling secrets on the host; never commit |
+| `agent/Dockerfile` | Optional | Thin `FROM` wrapper; Compose can pull GHCR directly |
+| `observability/*.generated.yml` | **Merge on the stack host** | Into live Prometheus / Alertmanager / Promtail — not a full replace |
+| `install-report.json` / `APPLY.md` | Optional | Operator reference |
+
+**Do not** assume the install output path on your laptop is what production
+mounts. Larger hosts often promote the workspace into their own repo (for
+example `infrastructure/diagnostic-agent/`) and sync that tree with a host
+deploy script. The runtime contract is the same: a directory with `agent.yaml`
+(+ profile / runbooks) mounted at `AGENT_WORKSPACE`.
+
+### Layout on the remote host
+
+Pick a stable root, for example `/opt/diagnostic-agent/`:
+
+```text
+/opt/diagnostic-agent/
+├── docker-compose.yml      # from agent/docker-compose.yml (paths adjusted)
+├── .env                    # secrets + AGENT_* (mode 600)
+└── workspace/              # from agent/workspace/
+    ├── agent.yaml
+    ├── …profiles…
+    └── runbooks/
+```
+
+If Compose stays in `agent/` as generated, keep `workspace/` as a sibling of
+`docker-compose.yml` so the relative mount `./workspace:/workspace:ro` still
+works.
+
+### Copy with scp / rsync
+
+**bash** (from the machine that has the install output):
+
+```bash
+REMOTE=ec2-user@ops.example.com
+KEY=$HOME/.ssh/ops.pem
+OUT=./deploy          # your --output directory
+DEST=/opt/diagnostic-agent
+
+ssh -i "$KEY" "$REMOTE" "sudo mkdir -p $DEST && sudo chown \$USER:\$USER $DEST"
+
+# Workspace (always)
+rsync -az -e "ssh -i $KEY" \
+  "$OUT/agent/workspace/" "$REMOTE:$DEST/workspace/"
+
+# Compose + env (Docker runtime)
+scp -i "$KEY" \
+  "$OUT/agent/docker-compose.yml" \
+  "$OUT/agent/.env" \
+  "$REMOTE:$DEST/"
+
+# Agent process runs as UID 10001 in the published image — host files must be readable
+ssh -i "$KEY" "$REMOTE" "chmod -R a+rX $DEST/workspace && chmod 600 $DEST/.env"
+```
+
+**PowerShell** (OpenSSH `scp` / `ssh`):
+
+```powershell
+$Remote = "ec2-user@ops.example.com"
+$Key    = "$HOME\.ssh\ops.pem"
+$Out    = ".\deploy"
+$Dest   = "/opt/diagnostic-agent"
+
+ssh -i $Key $Remote "sudo mkdir -p $Dest && sudo chown `$USER:`$USER $Dest"
+scp -i $Key -r "$Out\agent\workspace" "${Remote}:${Dest}/"
+scp -i $Key "$Out\agent\docker-compose.yml" "$Out\agent\.env" "${Remote}:${Dest}/"
+ssh -i $Key $Remote "chmod -R a+rX $Dest/workspace && chmod 600 $Dest/.env"
+```
+
+After copy, fix Compose volume paths if you flattened the layout (generated file
+expects `./workspace` next to `docker-compose.yml`).
+
+### Merge observability on the stack host
+
+On the host that runs Prometheus / Alertmanager (often the same machine):
+
+1. Merge `observability/prometheus/alert-rules.generated.yml` into `rule_files`
+   (additive group only).
+2. Merge `observability/alertmanager/route.generated.yml` receiver + route.
+3. Confirm Promtail/Loki streams emit `service=` labels matching `service_map.yaml`.
+4. Reload: `curl -X POST http://<prometheus>/-/reload` and the same for
+   Alertmanager (lifecycle API must be enabled).
+
+Confirm the **webhook URL** in the AM snippet is reachable **from Alertmanager**,
+not from your laptop. Same Docker network → container DNS
+(`http://diagnostic-agent:8000/alert`). Cross-host → published IP/DNS and open
+port. Override at install time with `--webhook-url` if needed.
+
+### Start or refresh the agent on the remote host
+
+```bash
+ssh -i "$KEY" "$REMOTE" "cd $DEST && docker compose --env-file .env pull && docker compose --env-file .env up -d"
+ssh -i "$KEY" "$REMOTE" "curl -sf http://127.0.0.1:8001/health"
+```
+
+Workspace-only updates (profile / runbooks) need a **restart or recreate** so
+startup reloads YAML and rebuilds the RAG index:
+
+```bash
+ssh -i "$KEY" "$REMOTE" "cd $DEST && docker compose --env-file .env up -d --force-recreate diagnostic-agent"
+```
+
+### Checklist before declaring remote deploy done
+
+- [ ] `/health` → `status=ok`, `redaction_rules > 0`, expected `preset`
+- [ ] `AGENT_PROMETHEUS_URL` / `AGENT_LOKI_URL` resolve **from inside the agent
+      container** (Docker DNS or host gateway — not your laptop’s `localhost`)
+- [ ] Alertmanager can POST the webhook URL
+- [ ] Secrets present on the host only (`.env` mode 600; not in git)
+- [ ] Smoke / rule-path as in [TESTING.md](TESTING.md) if this is production
+
+---
+
+## Run the agent (Docker image or standalone process)
+
+The published artifact is `ghcr.io/mskrado/diagnostic-agent:<tag>`. The same
+process (`diag serve`) runs inside that image or under a local Python install.
+Configuration always comes from **environment variables** + a **workspace
+directory**.
+
+### A. Docker Compose (recommended — install bundle)
+
+From the install output (local or after remote copy):
+
+```bash
+cd deploy/agent   # or /opt/diagnostic-agent after remote flatten
+docker compose --env-file .env up -d
+curl -sf http://127.0.0.1:8001/health
+```
+
+What Compose wires for you:
+
+| Concern | Typical setting |
+|---|---|
+| Image | `DIAGNOSTIC_AGENT_IMAGE` / `ghcr.io/mskrado/diagnostic-agent:…` |
+| Workspace | `./workspace` → `/workspace:ro`, `AGENT_WORKSPACE=/workspace` |
+| Profile | `AGENT_PROFILE_DIR` set from workspace (`diag serve` resolves `agent.yaml`) |
+| Observability network | External Docker network when discovery found one (container DNS) |
+| Persistence | Named volumes for audit JSONL + Chroma RAG |
+| Host port | `8001:8000` (or discovered `agent_host_port`) |
+
+Edit **workspace YAML**, not the image, for stack-specific behaviour. Pin the
+image tag for reproducible deploys.
+
+### B. Plain `docker run` (no Compose file)
+
+Use when you already have orchestration elsewhere or want a one-shot container:
+
+```bash
+docker run -d --name diagnostic-agent --restart unless-stopped \
+  -p 8001:8000 \
+  --env-file /opt/diagnostic-agent/.env \
+  -e AGENT_WORKSPACE=/workspace \
+  -v /opt/diagnostic-agent/workspace:/workspace:ro \
+  -v diagnostic_agent_audit:/app/audit \
+  -v diagnostic_agent_chroma:/app/chroma_db \
+  --network <observability-network> \
+  ghcr.io/mskrado/diagnostic-agent:<pinned-tag>
+```
+
+Notes:
+
+- Join the **same Docker network** as Prometheus/Loki/Alertmanager when URLs use
+  container DNS (`http://prometheus:9090`). Otherwise point `.env` at
+  host-reachable URLs (`http://host.docker.internal:9090` or the remote host IP)
+  and add `--add-host=host.docker.internal:host-gateway` on Linux if needed.
+- Image default `CMD` is `diag serve --host 0.0.0.0 --port 8000`.
+- Process user is **UID 10001** — workspace must be world-readable (`chmod -R a+rX`).
+- Do **not** set `AGENT_PROFILE_DIR=""` in the environment; an empty string
+  shadows workspace discovery. Omit it and let `diag serve` fill it from
+  `agent.yaml`, or set it explicitly to `/workspace` / `/workspace/profile`.
+
+### C. Standalone process (`pip` + `diag serve`)
+
+Run on the host (or a VM) without Docker when you prefer a systemd unit or an
+existing Python runtime:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
+pip install diagnostic-agent       # or: pip install -e ".[dev]" from a checkout
+
+# Point at the workspace (install bundle or host-owned tree)
+export AGENT_WORKSPACE=/opt/diagnostic-agent/workspace
+# Optional overrides — normally derived from agent.yaml:
+# export AGENT_PROFILE_DIR=/opt/diagnostic-agent/workspace/profile
+# export AGENT_DEFAULT_PRESET=spring-micrometer
+
+# Load the same knobs Compose would inject (URLs, LLM, SMTP, …)
+set -a && source /opt/diagnostic-agent/.env && set +a
+
+diag serve --host 0.0.0.0 --port 8000
+# equivalent: python -m app.cli serve --host 0.0.0.0 --port 8000
+```
+
+**systemd** sketch:
+
+```ini
+[Unit]
+Description=diagnostic-agent
+After=network-online.target
+
+[Service]
+Type=simple
+User=diagagent
+WorkingDirectory=/opt/diagnostic-agent
+EnvironmentFile=/opt/diagnostic-agent/.env
+Environment=AGENT_WORKSPACE=/opt/diagnostic-agent/workspace
+ExecStart=/opt/diagnostic-agent/.venv/bin/diag serve --host 0.0.0.0 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Standalone specifics:
+
+- Prometheus/Loki URLs must be reachable **from that host process** (often
+  `http://127.0.0.1:9090` if ports are published, not Docker DNS names).
+- Alertmanager’s webhook must reach this process’s bind address/port (firewall /
+  reverse proxy as needed).
+- Writable dirs: audit log (`AGENT_AUDIT_LOG_DIR`) and Chroma
+  (`AGENT_CHROMA_PATH`) — create them and give the service user write access.
+- LLM credentials: same as Docker (`OPENAI_API_KEY`, AWS instance role / keys for
+  Bedrock, etc.). Prefer instance roles in production when using Bedrock.
+
+### Configuration surface (both runtimes)
+
+| Area | How to set | Docs |
+|---|---|---|
+| Workspace / profiles / runbooks | Files under `AGENT_WORKSPACE` | [WORKSPACE.md](WORKSPACE.md) |
+| Prom / Loki / Grafana / SMTP / LLM | `AGENT_*` in `.env` or process env | [`.env.example`](../.env.example), [INTEGRATING.md](INTEGRATING.md) |
+| Image pin | `DIAGNOSTIC_AGENT_IMAGE` (Compose) | Install bundle `.env` |
+| Webhook path | Alertmanager → `http://<agent-host>:8000/alert` (container) or published `:8001` | Install `route.generated.yml` |
+| Redaction fail-closed | `AGENT_REQUIRE_REDACTION=true` (default) | Must resolve ≥1 rule or refuse to start |
+
+`GET /health` is the smoke check: `status`, `preset`, `redaction_rules`,
+`service_map`, `models`, `rag_available`.
+
+### Choosing a runtime
+
+| Runtime | Prefer when |
+|---|---|
+| **Compose / `docker run`** | Agent sits next to the observability stack; you want network DNS + volume isolation |
+| **Standalone `diag serve`** | No Docker on the agent host, or you already manage Python services with systemd |
+| **Host-owned workspace in a monorepo** | Production hosts that version profile/runbooks beside compose (installer output is a seed, then promote) — see [INTEGRATING.md](INTEGRATING.md) |
+
 ---
 
 ## Graceful degradation
@@ -539,9 +811,11 @@ partial bundle.
 | `Prometheus is required but was not reachable` | Prom down or wrong host | Start Prometheus or pass `--prometheus-url` |
 | Agent healthy but never fires | Webhook URL not reachable from AM | Check placement table; set `--webhook-url`; open AM silences/logs |
 | Empty metrics in reports | Wrong `--preset` or `service=` labels | Align preset + service map + PromQL labels |
-| `0 redaction rules` / validate fail | Broken `extends:` chain | Keep `redaction.yaml` with `extends: <preset>` |
+| `0 redaction rules` / validate fail | Broken `extends:` chain or empty mount | Keep `redaction.yaml` with `extends: <preset>`; `chmod a+rX` workspace for UID 10001 |
 | `--start` health fail | Port conflict or image pull | Check `8001`, `docker compose logs`, image pin |
 | SSH discovery empty | BatchMode / keys | Ensure `ssh -o BatchMode=yes user@host docker ps` works |
+| Remote agent can’t reach Prom/Loki | `.env` still has laptop `localhost` or wrong Docker network | Use container DNS on shared network, or host-gateway / published ports from the agent host |
+| Standalone `diag serve` ignores workspace | `AGENT_WORKSPACE` unset / wrong cwd | Export `AGENT_WORKSPACE` to the directory that contains `agent.yaml` |
 | Windows console Unicode errors | Old installer build | Use current release (ASCII status markers) |
 
 ---
@@ -569,13 +843,22 @@ diag install --output ./deploy --dry-run
 # 2) Interactive install
 diag install --output ./deploy
 
-# 3) Non-interactive / CI
+# 3) Discover a remote stack from your laptop, write a local bundle
+diag install --output ./deploy-ops \
+  --target ops.example.com \
+  --ssh ec2-user@ops.example.com
+
+# 4) Non-interactive / CI
 diag install --output ./deploy --non-interactive --yes \
   --prometheus-url http://prometheus:9090 \
   --loki-url http://loki:3100 \
   --preset generic-prometheus \
   --chat-provider ollama
 
-# 4) Generate, reload stack, start agent
+# 5) Generate, reload stack, start agent (same host)
 diag install --output ./deploy --non-interactive --yes --apply --start
+
+# 6) Or copy the bundle to a remote host and start there — see
+#    “Deploy the install bundle to a remote host” and
+#    “Run the agent (Docker image or standalone process)” above.
 ```
