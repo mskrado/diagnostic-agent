@@ -26,13 +26,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BRAND_PATTERN = re.compile(r"publishi(?!ng)", re.IGNORECASE)
 
 # Paths where naming a downstream host repository is legitimate context rather
-# than branding leakage: SDLC/design docs describing who consumes this agent,
-# and this guard itself.
+# than branding leakage. Only this guard qualifies today: the SDLC and design
+# docs that used to be listed here describe the fork model now and name no host.
+# Entries are checked for staleness by test_allowlist_has_no_stale_entries.
 ALLOWED_PATHS = frozenset(
     {
-        ".cursor/rules/requirements-workflow.mdc",
-        "docs/SDLC_GUIDE.md",
-        "docs/design/sandboxed-execution.md",
         "tests/test_vendor_neutral.py",
     }
 )
@@ -82,6 +80,31 @@ def test_no_host_branding_in_tracked_files():
         "(acme, com.example.*, <prefix>-<service>). If the reference is "
         "legitimate context about a downstream host repo, add the path to "
         "ALLOWED_PATHS with a reason.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_allowlist_has_no_stale_entries():
+    """An allowlisted path that no longer needs it must be removed.
+
+    A stale entry is a permanent, silent exemption: once the branding in that
+    file is cleaned up, the path keeps its waiver and branding can be
+    reintroduced there without the guard noticing.
+    """
+    stale: list[str] = []
+    for rel in sorted(ALLOWED_PATHS):
+        if rel == "tests/test_vendor_neutral.py":
+            continue  # this file necessarily contains the pattern it matches
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            stale.append(f"{rel} (no longer exists)")
+            continue
+        if not BRAND_PATTERN.search(path.read_text(encoding="utf-8")):
+            stale.append(f"{rel} (no branding left)")
+
+    assert not stale, (
+        "Remove these paths from ALLOWED_PATHS — they no longer contain host "
+        "branding, so the waiver only hides future regressions:\n  "
+        + "\n  ".join(stale)
     )
 
 

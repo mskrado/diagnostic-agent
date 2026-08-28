@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import fields
 from pathlib import Path
+from typing import Any
 
 from .collect import collect
 from .discover import discover
 from .generate import generate
-from .models import DiscoveryReport
+from .models import DiscoveryReport, InstallParams
 from .progress import make_progress
 from .prompt import PromptAborted
 from .verify import verify
@@ -22,6 +24,11 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
             "observability config into --output"
         ),
     )
+    _add_install_args(p)
+    p.set_defaults(func=run_install)
+
+
+def _add_install_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--target",
         default="local",
@@ -69,6 +76,23 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
         help="Force LLM provider (ollama|openai|bedrock_converse|anthropic|google_genai)",
     )
     p.add_argument("--chat-model", default=None)
+    p.add_argument(
+        "--agent-image",
+        default=None,
+        help="Prebuilt image tag (default: ghcr.io/mskrado/diagnostic-agent:latest)",
+    )
+    p.add_argument(
+        "--base-image",
+        default=None,
+        help="Python base for self-build Dockerfile (install bundle with build)",
+    )
+    p.add_argument(
+        "--build-from-source",
+        action="store_true",
+        help="Generate a Dockerfile that builds from repo source",
+    )
+    p.add_argument("--pip-index-url", default=None, help="Internal PyPI mirror URL")
+    p.add_argument("--pip-extra-index-url", default=None)
     p.add_argument(
         "--dry-run",
         action="store_true",
@@ -122,19 +146,27 @@ def add_install_parser(sub: argparse._SubParsersAction) -> None:
         default=3.0,
         help="HTTP probe timeout seconds (default: 3)",
     )
-    p.set_defaults(func=run_install)
 
 
 def run_install(args: argparse.Namespace) -> int:
     try:
-        return _run_install(args)
+        rc, _, _, _ = _run_install_core(args, output=Path(args.output), layout="bundle")
+        return rc
     except KeyboardInterrupt:
         print("\nAborted by operator; nothing was written.", file=sys.stderr)
         return 130
 
 
-def _run_install(args: argparse.Namespace) -> int:
-    print(f"diag install - target={args.target} output={args.output}")
+def _run_install_core(
+    args: argparse.Namespace,
+    *,
+    output: Path,
+    layout: str = "bundle",
+    extra_overrides: dict[str, Any] | None = None,
+    repo_root: Path | None = None,
+) -> tuple[int, Path, InstallParams, DiscoveryReport]:
+    """Shared discover → collect → generate → verify for install and init."""
+    print(f"diag {getattr(args, 'command', 'install')} - target={args.target} output={output}")
 
     non_interactive = args.non_interactive
     if not non_interactive and not args.accept_defaults and not sys.stdin.isatty():
@@ -152,8 +184,6 @@ def _run_install(args: argparse.Namespace) -> int:
         progress=progress,
     )
 
-    # Live chart already left the final summary on screen when TTY; otherwise
-    # print the static discovery block that scripts/CI rely on.
     if not getattr(progress, "enabled", False):
         _print_discovery(report)
     else:
@@ -169,14 +199,14 @@ def _run_install(args: argparse.Namespace) -> int:
                 "\nDiscovery failed. Fix connectivity or pass --prometheus-url.",
                 file=sys.stderr,
             )
-            return 1
+            return 1, output, InstallParams(), report
         print(
             "\nDiscovery incomplete — continuing to collect required "
             "parameters interactively.",
             file=sys.stderr,
         )
 
-    overrides = {
+    overrides: dict[str, Any] = {
         "preset": args.preset,
         "prometheus_url": args.prometheus_url,
         "loki_url": args.loki_url,
@@ -186,6 +216,21 @@ def _run_install(args: argparse.Namespace) -> int:
         "chat_provider": args.chat_provider,
         "chat_model": args.chat_model,
     }
+    if getattr(args, "agent_image", None):
+        overrides["agent_image"] = args.agent_image
+    if getattr(args, "base_image", None):
+        overrides["base_image"] = args.base_image
+    if getattr(args, "build_from_source", False):
+        overrides["build_from_source"] = True
+    if getattr(args, "pull_image", False):
+        overrides["build_from_source"] = False
+    if getattr(args, "pip_index_url", None):
+        overrides["pip_index_url"] = args.pip_index_url
+    if getattr(args, "pip_extra_index_url", None):
+        overrides["pip_extra_index_url"] = args.pip_extra_index_url
+    if extra_overrides:
+        overrides.update(extra_overrides)
+
     try:
         params = collect(
             report,
@@ -199,31 +244,33 @@ def _run_install(args: argparse.Namespace) -> int:
         )
     except (ValueError, PromptAborted) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return 1, output, InstallParams(), report
 
-    output = Path(args.output)
+    _apply_param_overrides(params, overrides)
+
     written = generate(
         output=output,
         report=report,
         params=params,
         dry_run=args.dry_run,
         force=args.force,
+        package_root=repo_root,
+        layout=layout,
     )
     print(f"\n{'Would write' if args.dry_run else 'Wrote'} {len(written)} file(s)")
     for decision in report.decisions:
         print(f"  - {decision}")
 
     if args.dry_run:
-        return 0
+        return 0, output, params, report
 
-    errors = verify(output, allow_degraded=args.allow_degraded)
+    errors = verify(output, allow_degraded=args.allow_degraded, layout=layout)
     if errors:
         print("\nverify FAILED:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
-        return 1
+        return 1, output, params, report
     print("\nverify OK")
-    _print_next_steps(output, params, report)
 
     if args.apply:
         from .apply import apply_reloads
@@ -247,13 +294,36 @@ def _run_install(args: argparse.Namespace) -> int:
         rc, msg = start_agent(output)
         print(f"start: {msg}")
         if rc != 0:
-            return rc
+            return rc, output, params, report
         ok, health_msg = health_check(params)
         print(f"start: {health_msg}")
         if not ok:
-            return 1
+            return 1, output, params, report
 
-    return 0
+    return 0, output, params, report
+
+
+# Only build/packaging knobs may be force-applied after collect(). Everything
+# else (preset, URLs, ports) is already resolved by collect(), which normalises
+# sentinel values -- blanket-applying overrides would write back the raw CLI
+# input and turn `--preset auto` into a literal `extends: auto`.
+_FORCED_OVERRIDE_KEYS = frozenset(
+    {
+        "agent_image",
+        "base_image",
+        "build_from_source",
+        "local_image_tag",
+        "pip_extra_index_url",
+        "pip_index_url",
+    }
+)
+
+
+def _apply_param_overrides(params: InstallParams, overrides: dict[str, Any]) -> None:
+    valid = {f.name for f in fields(InstallParams)}
+    for key, value in overrides.items():
+        if key in _FORCED_OVERRIDE_KEYS and key in valid and value is not None:
+            setattr(params, key, value)
 
 
 def _print_discovery(report: DiscoveryReport) -> None:
@@ -280,7 +350,8 @@ def _print_next_steps(
     print("\nNext steps")
     print("----------")
     print(f"  1. Review   {output / 'install-report.json'}")
-    print(f"  2. Edit     {output / 'agent' / 'workspace' / 'service_map.yaml'}")
+    ws = output / "workspace" if (output / "workspace").is_dir() else output / "agent" / "workspace"
+    print(f"  2. Edit     {ws / 'service_map.yaml'}")
     print(f"  3. Start    cd {output / 'agent'} && docker compose --env-file .env up -d")
     print(
         f"  4. Health   curl -sf http://127.0.0.1:"

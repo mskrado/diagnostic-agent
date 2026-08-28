@@ -3,6 +3,18 @@ __pycache__/
 .pytest_cache/
 chroma_db/
 audit/
-.env
-tests/
 .venv/
+tests/
+
+# Keep secrets out of the build context. Client forks build with the repo root
+# as context (see client/agent/docker-compose.yml), so a nested client/agent/.env
+# or deploy/*/agent/.env would otherwise be shipped to the daemon.
+**/.env
+*.bak.*
+
+# Not needed by any COPY, and .git is the single largest directory.
+.git/
+deploy/
+docs/
+eval-results/
+replay-results/

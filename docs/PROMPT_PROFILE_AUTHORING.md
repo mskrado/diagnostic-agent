@@ -44,7 +44,7 @@ docker inspect <agent-container> --format '{{range .Mounts}}{{.Source}} -> {{.De
 | **Container name** | `docker logs` / `docker exec` | `docker ps --format '{{.Names}}'` |
 
 Also record **in-network DNS** names the agent container can resolve
-(`prometheus`, `loki`, `publishi-platform`, …) vs **host localhost ports**.
+(`prometheus`, `loki`, `acme-platform`, …) vs **host localhost ports**.
 
 ### 3. Ports and health endpoints
 
@@ -60,7 +60,7 @@ profile can tell the LLM what **not** to trust. Prefer evidence from
 
 ### 5. Failure modes already seen
 
-If audits show invented names (e.g. `publishi-platform-service`, wrong
+If audits show invented names (e.g. `acme-platform-service`, wrong
 `docker compose logs …`), add an explicit **FORBIDDEN** list in
 `tool_run_hints`.
 
@@ -91,7 +91,7 @@ Write them in this order:
 1. **Where to run commands** — in-network DNS vs host localhost.
 2. **Allowlist tables** — alert `service=` ↔ compose key ↔ `container_name`.
 3. **Hard rules** — use alert `service=` for Prom/Loki filters; never invent
-   prefixes; never mix compose keys with `publishi-` container prefixes.
+   prefixes; never mix compose keys with `<prefix>-` container prefixes.
 4. **Golden commands** — PromQL, LogQL, `docker logs` / `docker compose logs`,
    actuator, dependency probes (`pg_isready`, `redis-cli ping`).
 5. **Forbidden examples** — 2–4 wrong strings the model has invented before.
@@ -107,7 +107,7 @@ Every golden command must use names from the allowlist only.
 - [ ] Every compose/container name appears in `docker compose config` / `docker ps`.
 - [ ] Every Prom/Loki `service=` filter matches live label values (or
       `service_map` `log_services` / `log_selector`).
-- [ ] No hybrid names (`publishi-` + compose key glued together).
+- [ ] No hybrid names (`<prefix>-` + compose key glued together).
 - [ ] Hints agree with `service_map.yaml` and runbook examples (scrub runbooks
       if they contradict).
 - [ ] `diag validate` (or container equivalent) still passes.
