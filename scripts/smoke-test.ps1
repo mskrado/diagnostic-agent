@@ -2,11 +2,13 @@
 # Golden copy lives in diagnostic-agent (issue #72). See docs/TESTING.md.
 #
 # Usage (from this repo root in PowerShell — do NOT paste into the shell from chat/docs):
-#   .\scripts\smoke-test.ps1 -ContainerPrefix publishi
-#   .\scripts\smoke-test.ps1 -ContainerPrefix publishi -RealPath
-#   .\scripts\smoke-test.ps1 -ContainerPrefix publishi -DirectAgent
-#   .\scripts\smoke-test.ps1 -ContainerPrefix publishi -RulePath
-#   .\scripts\smoke-test.ps1 -SkipGrafana -SkipMailpit
+#   .\scripts\smoke-test.ps1 -ContainerPrefix <your-compose-prefix>
+#   .\scripts\smoke-test.ps1 -ContainerPrefix <your-compose-prefix> -RealPath
+#   .\scripts\smoke-test.ps1 -ContainerPrefix <your-compose-prefix> -DirectAgent
+#   .\scripts\smoke-test.ps1 -ContainerPrefix <your-compose-prefix> -RulePath
+#   .\scripts\smoke-test.ps1 -ContainerPrefix <your-compose-prefix> -SkipGrafana -SkipMailpit
+# The prefix is required (or set AGENT_E2E_CONTAINER_PREFIX): container names are
+# host-specific, so there is no safe default to guess.
 # Git Bash / WSL: ./scripts/smoke-test.sh (delegates here)
 #
 # Prerequisites (host observability + agent containers running):
@@ -17,7 +19,7 @@
 #   - Optional host .env via -EnvFile (defaults: cwd/.env then parent of cwd)
 
 param(
-    [string]$ContainerPrefix = $(if ($env:AGENT_E2E_CONTAINER_PREFIX) { $env:AGENT_E2E_CONTAINER_PREFIX } else { "publishi" }),
+    [string]$ContainerPrefix = $env:AGENT_E2E_CONTAINER_PREFIX,
     [string]$AgentUrl = "http://localhost:8001",
     [string]$AlertmanagerUrl = "http://localhost:9093",
     [string]$MailpitUrl = "http://localhost:8025",
@@ -39,13 +41,17 @@ param(
     [switch]$RulePath,
     [string]$LokiContainer = "",
     [string]$PromtailContainer = "",
-    [string]$SmokeMarker = "PUBLISHI_SMOKE_MARKER",
+    [string]$SmokeMarker = $(if ($env:AGENT_E2E_SMOKE_MARKER) { $env:AGENT_E2E_SMOKE_MARKER } else { "DIAGNOSTIC_AGENT_SMOKE_MARKER" }),
     [string]$EmitterName = "",
     [string]$EnvFile = "",
     [string]$StackHint = "",
     [int]$RealPathTimeoutSec = 180,
     [int]$AlertTimeoutSec = 300
 )
+
+if (-not $ContainerPrefix) {
+    throw "-ContainerPrefix is required (or set AGENT_E2E_CONTAINER_PREFIX). It is your compose project prefix, e.g. containers named <prefix>-prometheus, <prefix>-loki, <prefix>-diagnostic-agent."
+}
 
 if (-not $AgentContainer) { $AgentContainer = "$ContainerPrefix-diagnostic-agent" }
 if (-not $GrafanaContainer) { $GrafanaContainer = "$ContainerPrefix-grafana" }

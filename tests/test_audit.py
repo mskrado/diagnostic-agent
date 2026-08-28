@@ -28,11 +28,13 @@ def test_audit_record_includes_llm_exchange(tmp_path, monkeypatch):
         "service": "platform-service",
         "alert_type": "HighErrorRate",
         "diagnosis": {"primary_hypothesis": {"cause": "pool"}},
+        "llm_context": {
+            "rag_context": "Hikari pool exhaustion runbook chunk",
+            "rag_used": True,
+        },
         "llm_exchange": {
             "system_prompt": "You are a diagnostic agent",
             "user_prompt": "Alert: HighErrorRate on platform-service\nRunbook: none",
-            "rag_context": "Hikari pool exhaustion runbook chunk",
-            "rag_used": True,
             "token_usage": {
                 "input_tokens": 1200,
                 "output_tokens": 180,
@@ -49,8 +51,9 @@ def test_audit_record_includes_llm_exchange(tmp_path, monkeypatch):
     assert "llm_exchange" in record
     assert record["llm_exchange"]["system_prompt"].startswith("You are")
     assert "HighErrorRate" in record["llm_exchange"]["user_prompt"]
-    assert record["llm_exchange"]["rag_used"] is True
-    assert "Hikari" in record["llm_exchange"]["rag_context"]
+    assert "rag_context" not in record["llm_exchange"]
+    assert record["llm_context"]["rag_used"] is True
+    assert "Hikari" in record["llm_context"]["rag_context"]
     assert record["llm_exchange"]["token_usage"]["input_tokens"] == 1200
     assert record["llm_exchange"]["token_usage"]["output_tokens"] == 180
     assert record["llm_raw"] == '{"primary_hypothesis":{}}'

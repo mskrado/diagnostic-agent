@@ -1,8 +1,9 @@
 # Testing a deployed diagnostic-agent
 
-Golden **operator E2E tooling** lives in this repository. Host projects (for
-example publishi.ai) keep only thin wrappers or compose/workspace wiring — not
-duplicate smoke-script bodies.
+Golden **operator E2E tooling** lives in this repository. Host projects keep only
+thin wrappers or compose/workspace wiring — not duplicate smoke-script bodies.
+
+Examples below use `acme` as the compose project prefix; substitute your own.
 
 This page is the **command reference**. For which test layers exist, what each
 one proves, what must be configured, and which are safe against production, read
@@ -22,7 +23,8 @@ Related:
 Host-owned **content** (not moved here):
 
 - Workspace `scenarios.yaml` + `runbooks/` — alert → runbook pairs for `diag e2e`
-- Host Alertmanager / Loki ruler rules that define `DiagnosticAgentSmokeMarker`
+- Host Alertmanager / Loki ruler rules that define `DiagnosticAgentSmokeMarker`,
+  including the sentinel string they match (`-SmokeMarker` / `AGENT_E2E_SMOKE_MARKER`)
 - Compose service names / EC2 SSH targets (pass as script parameters or env)
 
 ---
@@ -38,7 +40,8 @@ Common env vars:
 
 | Variable | Used by |
 |---|---|
-| `AGENT_E2E_CONTAINER_PREFIX` | Default compose name prefix (`publishi` → `publishi-diagnostic-agent`, …) |
+| `AGENT_E2E_CONTAINER_PREFIX` | Compose name prefix (`acme` → `acme-diagnostic-agent`, …). Required — no default |
+| `AGENT_E2E_SMOKE_MARKER` | Sentinel string for `-RulePath`; must match your Loki rule (default `DIAGNOSTIC_AGENT_SMOKE_MARKER`) |
 | `AGENT_E2E_SSH_TARGET` | `user@host` for `prod-rulepath-e2e` |
 | `AGENT_E2E_SSH_IDENTITY` | Path to SSH private key |
 | `AGENT_E2E_URL` / `AGENT_E2E_WORKSPACE` | Live URL / workspace for `runbook-e2e` |
@@ -51,14 +54,14 @@ Common env vars:
 
 ```powershell
 # From diagnostic-agent repo root
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -DirectAgent   # POST /alert only
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RulePath      # Loki ruler path
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RealPath      # stop a service (destructive)
+.\scripts\smoke-test.ps1 -ContainerPrefix acme
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -DirectAgent   # POST /alert only
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RulePath      # Loki ruler path
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RealPath      # stop a service (destructive)
 ```
 
 ```bash
-./scripts/smoke-test.sh -ContainerPrefix publishi -DirectAgent
+./scripts/smoke-test.sh -ContainerPrefix acme -DirectAgent
 ```
 
 **Modes**
@@ -82,10 +85,10 @@ mode drives the **local** Docker daemon. Use §3 for remote rule-path.
 .\scripts\prod-rulepath-e2e.ps1 `
   -SshTarget ec2-user@YOUR_HOST `
   -IdentityFile $HOME\.ssh\your-key.pem `
-  -ContainerPrefix publishi
+  -ContainerPrefix acme
 
 # Also open local tunnels for Grafana / Mailpit / agent review:
-.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -OpenTunnels
+.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix acme -OpenTunnels
 ```
 
 Expect remote `PASS: DiagnosticAgentSmokeMarker audit record written`. Default
@@ -94,7 +97,7 @@ timeout is 420s (covers Alertmanager `group_interval` on repeat runs).
 After tunnels:
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -AgentUrl http://localhost:8001 -DirectAgent
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -AgentUrl http://localhost:8001 -DirectAgent
 ```
 
 ---
@@ -147,5 +150,5 @@ Example thin wrapper (host `scripts/diagnostic-agent-smoke-test.ps1`):
 
 ```powershell
 $AgentRoot = Join-Path (Split-Path $PSScriptRoot -Parent) ".." "diagnostic-agent"
-& (Join-Path $AgentRoot "scripts\smoke-test.ps1") -ContainerPrefix publishi @args
+& (Join-Path $AgentRoot "scripts\smoke-test.ps1") -ContainerPrefix acme @args
 ```

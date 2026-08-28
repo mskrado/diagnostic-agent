@@ -28,8 +28,8 @@ reset, team invites. Other modules unaffected.
 
 ## Example log lines (synthetic)
 ```json
-{"@timestamp":"2026-07-24T05:43:50.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"a1b2c3d4e5f678901234567890abcdef","message":"Failed to send template email to: user@example.com","stack_trace":"org.springframework.mail.MailSendException: Mail server connection failed; nested exception is jakarta.mail.MessagingException: Could not connect to SMTP host: smtp-relay.gmail.com, port: 465"}
-{"@timestamp":"2026-07-24T05:43:52.220Z","level":"ERROR","logger_name":"com.publishi.notification.config.AsyncConfig$AsyncExceptionHandler","service":"platform-service","trace_id":"a1b2c3d4e5f678901234567890abcdef","message":"Async exception in method sendTemplate: SMTP send failed: 535 5.7.8 Authentication credentials invalid — check stored SMTP password / SETTINGS_ENCRYPTION_KEY"}
+{"@timestamp":"2026-07-24T05:43:50.100Z","level":"ERROR","logger_name":"com.example.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"a1b2c3d4e5f678901234567890abcdef","message":"Failed to send template email to: user@example.com","stack_trace":"org.springframework.mail.MailSendException: Mail server connection failed; nested exception is jakarta.mail.MessagingException: Could not connect to SMTP host: smtp-relay.gmail.com, port: 465"}
+{"@timestamp":"2026-07-24T05:43:52.220Z","level":"ERROR","logger_name":"com.example.notification.config.AsyncConfig$AsyncExceptionHandler","service":"platform-service","trace_id":"a1b2c3d4e5f678901234567890abcdef","message":"Async exception in method sendTemplate: SMTP send failed: 535 5.7.8 Authentication credentials invalid — check stored SMTP password / SETTINGS_ENCRYPTION_KEY"}
 ```
 
 ## Hypotheses-only

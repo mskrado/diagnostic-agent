@@ -88,6 +88,19 @@ During a diagnosis (webhook or `POST /alert`):
 Wrong preset or an empty/stub `service_map.yaml` does not crash the agent, but
 live scoring against a real stack (metrics names, topology, hints) will be weak.
 
+### One workspace per running agent
+
+Steps 1–5 happen **once per process** and are cached for its lifetime, so a
+running instance is bound to exactly one workspace and therefore one stack. Only
+the per-alert `service` label varies between requests — the profile, topology,
+redaction rules, and RAG index do not.
+
+This is the intended sidecar model: run one agent per observability stack, each
+with its own workspace, `.env`, and Alertmanager webhook URL, which keeps
+credentials and retrieved runbooks scoped to a single environment. Editing
+workspace files therefore requires a **restart or container recreate** to take
+effect. See [README → Deployment model](../README.md#deployment-model-one-agent-per-stack).
+
 ## Manifest (`agent.yaml`)
 
 `agent.yaml` is optional. A directory following the conventional layout resolves
@@ -228,12 +241,15 @@ alert_line_filters:
 investigation commands. Core safety rules (hypotheses-only, evidence grounding,
 JSON schema) stay in agent code and **cannot** be overridden here.
 
-**How to configure.**
+**How to configure.** Prefer the coding-agent playbook
+[`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md) (inventory →
+naming matrix → golden/forbidden commands). Short version:
 
 1. Describe the real architecture in `platform_description` (gateway, monolith,
    backing stores).
 2. Put copy-pasteable curl / docker / actuator examples in `tool_run_hints`
-   using **your** hostnames and ports.
+   using **your** hostnames and ports — and keep alert `service=` labels,
+   compose service keys, and `container_name` values in separate allowlists.
 3. Keep hints honest: suggested human steps, not claims the agent already ran
    them.
 
