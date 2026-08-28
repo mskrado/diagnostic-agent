@@ -22,9 +22,9 @@ def test_stream_selector_override():
     assert (
         stream_selector(
             service="frontend",
-            log_selector='{app="publishi-frontend"}',
+            log_selector='{app="acme-frontend"}',
         )
-        == '{app="publishi-frontend"}'
+        == '{app="acme-frontend"}'
     )
 
 

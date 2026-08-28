@@ -294,7 +294,7 @@ def format_diagnosis_email(report: dict, alert: dict | None = None) -> tuple[str
     service = report.get("service", "unknown")
     alert_type = report.get("alert_type", "unknown")
     severity = report.get("severity", "unknown")
-    env_tag = settings.email_subject_prefix.strip() or "publishi"
+    env_tag = settings.email_subject_prefix.strip() or "agent"
 
     subject = redact_text(f"[{env_tag} diagnostic] {alert_type} on {service} ({severity})")
 

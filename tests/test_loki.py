@@ -11,7 +11,7 @@ def test_format_log_entry_includes_timestamp_and_trace_id():
         {
             "@timestamp": "2026-07-07T06:58:12.345Z",
             "trace_id": "abc123def456",
-            "logger_name": "com.publishi.health.OpenAIHealthIndicator",
+            "logger_name": "com.example.health.OpenAIHealthIndicator",
             "message": "OpenAI health check failed: 401 Unauthorized",
             "level": "WARN",
         }
