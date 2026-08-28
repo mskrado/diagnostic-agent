@@ -1,5 +1,5 @@
 ---
-description: How requirements, issues, branches, PRs, and releases flow through GitHub for diagnostic-agent. Same practice as publishi.ai, adapted for this repo. Full reference: docs/SDLC_GUIDE.md.
+description: How requirements, issues, branches, PRs, and releases flow through GitHub for diagnostic-agent. Full reference: docs/SDLC_GUIDE.md.
 alwaysApply: true
 ---
 
@@ -76,4 +76,4 @@ gh pr create --base main --head devel \
 ```
 # Prefer: .\scripts\open-release-pr.ps1  or  bash scripts/generate-release-notes.sh --out release-notes.md
 
-Host workspace / image-pin changes belong in the **host** repository (e.g. publishi.ai), not as a re-vendor of this agent.
+Client deployment changes belong under **`client/`** in the client's private fork — not as edits to upstream-owned paths in this repo. See `docs/CLIENT_FORK.md`.

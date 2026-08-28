@@ -140,7 +140,7 @@ In scope:
 Today the agent is read-only by design. `app/graph/schema.py` labels `fix_suggestions` as
 "not auto-executed by the agent", `app/agent.py` enforces a fail-fast redaction guard, and the data
 clients are HTTP GET only. The agent is **golden source** pinned as an image by host repos
-(e.g. publishi.ai), so any execution capability is a *fleet-wide* liability, not a single-deployment
+(e.g. a multi-tenant SaaS host), so any execution capability is a *fleet-wide* liability, not a single-deployment
 choice.
 
 The article's author nearly restarted a primary production database at 2 a.m.; the only thing that

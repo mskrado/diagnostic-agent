@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 
-def verify(output: Path, *, allow_degraded: bool = False) -> list[str]:
+def verify(output: Path, *, allow_degraded: bool = False, layout: str = "bundle") -> list[str]:
     """Return a list of error strings (empty = OK).
 
     Default verifies a **complete** bundle (agent build/run + observability
@@ -16,7 +16,12 @@ def verify(output: Path, *, allow_degraded: bool = False) -> list[str]:
     """
     errors: list[str] = []
     output = output.resolve()
-    workspace = output / "agent" / "workspace"
+    client_layout = layout == "client"
+    workspace = (
+        output / "workspace"
+        if client_layout
+        else output / "agent" / "workspace"
+    )
     env_file = output / "agent" / ".env"
     rules = output / "observability" / "prometheus" / "alert-rules.generated.yml"
     am_route = output / "observability" / "alertmanager" / "route.generated.yml"

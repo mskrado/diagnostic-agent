@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+# Reproducible builds: pin BASE_IMAGE by digest in client/agent compose build.args.
+# Internal mirrors: pass PIP_INDEX_URL / PIP_EXTRA_INDEX_URL at build time.
+ARG BASE_IMAGE=python:3.12-slim
+ARG PIP_INDEX_URL=
+ARG PIP_EXTRA_INDEX_URL=
+FROM ${BASE_IMAGE}
+
 # No project baked in as the default profile: the agent runs on the in-package
 # preset unless a host workspace is mounted at /workspace. Presets always supply
 # redaction rules, so an unmounted /workspace degrades to preset-only behaviour
@@ -18,11 +25,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install deps first for better layer caching. Retries/timeout because the
-# resolver downloads several large wheels (chromadb, torch-free langchain stack)
-# and a single slow PyPI response otherwise fails the whole build.
-COPY requirements.txt .
-RUN pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt
+# Install deps first for better layer caching. Prefer requirements.lock when present.
+COPY requirements.txt requirements.lock* ./
+RUN if [ -f requirements.lock ]; then \
+      pip install --no-cache-dir -r requirements.lock; \
+    else \
+      pip install --no-cache-dir --retries 10 --timeout 120 -r requirements.txt; \
+    fi
 
 # App code + runtime assets (presets ship inside app/profile/presets).
 COPY app/ ./app/

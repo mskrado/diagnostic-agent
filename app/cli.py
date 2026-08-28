@@ -12,6 +12,7 @@ import argparse
 import os
 import socket
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -180,6 +181,28 @@ def _probe_http(name: str, url: str) -> tuple[bool, str]:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
+    if getattr(args, "check_fork", False):
+        from app.fork.drift import find_upstream_drift, read_upstream_version
+        from app.fork.boundary import CLIENT_DIR
+
+        repo_root = Path(__file__).resolve().parent.parent
+        drift = find_upstream_drift(repo_root)
+        version = read_upstream_version(repo_root / CLIENT_DIR)
+        print(f"upstream_version={version or '(none)'}")
+        if drift:
+            print("FAIL upstream drift detected in:")
+            for path in drift:
+                print(f"  {path}")
+            print(
+                "\nRevert edits to upstream-owned paths. Client config belongs "
+                f"under {CLIENT_DIR}/.",
+                file=sys.stderr,
+            )
+            return 1
+        print("fork hygiene OK (no upstream-owned drift)")
+        if not args.workspace and not os.environ.get("AGENT_WORKSPACE"):
+            return 0
+
     ws = load_workspace(args.workspace)
     _apply_workspace_env(ws)
 
@@ -378,6 +401,11 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="Probe Prometheus, Loki, Grafana, and SMTP connectivity"
     )
     _add_workspace_arg(doctor)
+    doctor.add_argument(
+        "--check-fork",
+        action="store_true",
+        help="Fail if upstream-owned paths were modified (client fork hygiene)",
+    )
     doctor.set_defaults(func=_cmd_doctor)
 
     e2e = sub.add_parser(
@@ -425,8 +453,12 @@ def build_parser() -> argparse.ArgumentParser:
     replay.set_defaults(func=_cmd_replay)
 
     from .install.cli import add_install_parser
+    from .install.init_cli import add_init_parser
+    from .fork.upgrade_cli import add_upgrade_parser
 
     add_install_parser(sub)
+    add_init_parser(sub)
+    add_upgrade_parser(sub)
 
     return parser
 

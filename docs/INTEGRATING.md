@@ -1,8 +1,11 @@
 # Integrating diagnostic-agent into your project
 
-This guide shows how to wire the agent into an existing stack **without
-modifying agent code**. You supply a **workspace** — configuration and content
-in your own repository — and the published agent does the rest.
+**Preferred path:** hold a **client fork** of this repository and run `diag init`
+to scaffold `client/` (compose, workspace, start scripts). See
+**[CLIENT_FORK.md](CLIENT_FORK.md)**.
+
+This guide covers Alertmanager wiring, verification, and CI for any workspace
+layout (client fork or throwaway `diag install` bundle).
 
 ---
 
@@ -22,7 +25,8 @@ in your own repository — and the published agent does the rest.
 
 | Option | When to use |
 |---|---|
-| **Docker image** (`ghcr.io/mskrado/diagnostic-agent`) | Sidecar next to Prometheus / Loki / Alertmanager |
+| **Client fork** (`diag init`) | Production: private repo copy, self-build or pinned image, `diag upgrade` ([CLIENT_FORK.md](CLIENT_FORK.md)) |
+| **Docker image** (`ghcr.io/mskrado/diagnostic-agent`) | Online hosts pulling a published tag (`diag init --pull-image`) |
 | **pip package** (`pip install diagnostic-agent`) | Embed in a Python host or run `diag serve` |
 
 ## 2. Create a workspace
