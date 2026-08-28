@@ -142,7 +142,10 @@ data. Check the count with `diag validate` or `GET /health`;
 
 Put a short description of *your* platform and copy-pasteable tool hints here.
 Core safety rules (hypotheses-only, evidence grounding, JSON schema) stay in
-agent code and cannot be overridden.
+agent code and cannot be overridden. For a full coding-agent checklist
+(inventory of alert labels vs compose services vs container names, golden
+commands, forbidden inventions), see
+[`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md).
 
 ## 3. Wire Alertmanager
 

@@ -228,12 +228,15 @@ alert_line_filters:
 investigation commands. Core safety rules (hypotheses-only, evidence grounding,
 JSON schema) stay in agent code and **cannot** be overridden here.
 
-**How to configure.**
+**How to configure.** Prefer the coding-agent playbook
+[`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md) (inventory →
+naming matrix → golden/forbidden commands). Short version:
 
 1. Describe the real architecture in `platform_description` (gateway, monolith,
    backing stores).
 2. Put copy-pasteable curl / docker / actuator examples in `tool_run_hints`
-   using **your** hostnames and ports.
+   using **your** hostnames and ports — and keep alert `service=` labels,
+   compose service keys, and `container_name` values in separate allowlists.
 3. Keep hints honest: suggested human steps, not claims the agent already ran
    them.
 
