@@ -193,6 +193,38 @@ def extract_diagnosis_payload(raw_msg: Any) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def format_llm_raw(raw_msg: Any) -> str:
+    """Serialize the full model output for audit (text and/or ToolUse args).
+
+    Bedrock Converse structured output often leaves ``content`` empty and puts
+    the Diagnosis payload in tool-call arguments. Token usage still counts those
+    args as output tokens, so audit must capture them — not only message text.
+    """
+    if raw_msg is None:
+        return ""
+
+    text = content_to_text(getattr(raw_msg, "content", "")).strip()
+    args = _tool_call_args(raw_msg)
+
+    if args is not None:
+        args_json = json.dumps(args, default=str)
+        if text:
+            return f"{text}\n{args_json}"
+        return args_json
+
+    if text:
+        return text
+
+    # Last resort: dump tool_calls list when args extraction failed.
+    tool_calls = getattr(raw_msg, "tool_calls", None)
+    if tool_calls:
+        try:
+            return json.dumps(tool_calls, default=str)
+        except TypeError:
+            return str(tool_calls)
+    return ""
+
+
 def parse_diagnosis_payload(payload: dict[str, Any]) -> Diagnosis:
     """Validate a Diagnosis dict (runs ``repair_diagnosis_payload`` via schema)."""
     return Diagnosis.model_validate(payload)

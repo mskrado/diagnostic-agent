@@ -1,9 +1,10 @@
 """NIST-aligned audit logging.
 
 Every diagnostic run is appended to a per-day JSONL file with a timestamp, the
-full report, the exact LLM system/user prompts (incl. RAG context), token usage,
-and the raw LLM output. This is the auditable record of what the agent saw and
-concluded. Tenant identifiers are redacted before writing.
+full report, the exact LLM system/user prompts, retrieval context, token usage,
+and the raw LLM output (including Bedrock ToolUse args). This is the auditable
+record of what the agent saw and concluded. Tenant identifiers are redacted
+before writing.
 """
 from __future__ import annotations
 
@@ -19,8 +20,30 @@ from .redact import redact_text
 logger = logging.getLogger(__name__)
 
 
+def _llm_context_from_report(report: dict) -> dict[str, Any]:
+    """Prefer report.llm_context; fall back to legacy llm_exchange RAG fields."""
+    ctx = report.get("llm_context")
+    if isinstance(ctx, dict):
+        return {
+            "rag_context": ctx.get("rag_context") or "",
+            "rag_used": bool(ctx.get("rag_used")),
+        }
+    exchange = report.get("llm_exchange") or {}
+    return {
+        "rag_context": exchange.get("rag_context") or "",
+        "rag_used": bool(exchange.get("rag_used")),
+    }
+
+
 def build_audit_record(report: dict, llm_raw: str) -> dict[str, Any]:
-    """Build the pre-redaction audit object (also used for email attachments)."""
+    """Build the pre-redaction audit object (also used for email attachments).
+
+    Top-level fields mirror the report for easy jq / attachment access:
+
+    - ``llm_raw`` — full model output (text and/or ToolUse JSON)
+    - ``llm_context`` — retrieval context only (RAG)
+    - ``llm_exchange`` — prompts + token usage + model ids
+    """
     exchange = report.get("llm_exchange") or {}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -29,8 +52,8 @@ def build_audit_record(report: dict, llm_raw: str) -> dict[str, Any]:
         "chat_model": settings.chat_model,
         "embed_provider": settings.embed_provider,
         "embed_model": settings.embed_model,
-        # Easy retrieval: prompts + tokens at the top level
         "llm_exchange": exchange,
+        "llm_context": _llm_context_from_report(report),
         "llm_raw": llm_raw,
         "report": report,
     }
@@ -42,11 +65,7 @@ def redact_audit_json(record: dict[str, Any]) -> str:
 
 
 def write_audit_record(report: dict, llm_raw: str) -> str | None:
-    """Append a redacted audit record; return the file path written, or None.
-
-    Top-level ``llm_exchange`` mirrors ``report.llm_exchange`` so prompts and
-    tokens are easy to pull with jq without walking the full report tree.
-    """
+    """Append a redacted audit record; return the file path written, or None."""
     try:
         os.makedirs(settings.audit_log_dir, exist_ok=True)
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -56,14 +75,16 @@ def write_audit_record(report: dict, llm_raw: str) -> str | None:
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         usage = (record.get("llm_exchange") or {}).get("token_usage") or {}
+        llm_context = record.get("llm_context") or {}
         logger.info(
             "audit record written: %s tokens_in=%s tokens_out=%s tokens_total=%s "
-            "rag_used=%s",
+            "rag_used=%s llm_raw_chars=%d",
             path,
             usage.get("input_tokens"),
             usage.get("output_tokens"),
             usage.get("total_tokens"),
-            (record.get("llm_exchange") or {}).get("rag_used"),
+            llm_context.get("rag_used"),
+            len(llm_raw or ""),
         )
         return path
     except OSError as exc:

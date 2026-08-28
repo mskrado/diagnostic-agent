@@ -229,7 +229,7 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from app.config import settings
-    from app.llm import content_to_text, invoke_structured_diagnosis
+    from app.llm import format_llm_raw, invoke_structured_diagnosis
     from app.llm_usage import extract_token_usage
 
     formatted = format_logs(case.get("logs", []))
@@ -240,25 +240,32 @@ def run_offline(model, case: dict, *, include_rag: bool = False) -> dict:
     )
     parsed = result.get("parsed") if isinstance(result, dict) else None
     raw_msg = result.get("raw") if isinstance(result, dict) else None
-    raw = content_to_text(getattr(raw_msg, "content", ""))
+    raw = format_llm_raw(raw_msg)
     token_usage = extract_token_usage(raw_msg)
     exchange = {
         "system_prompt": system,
         "user_prompt": human,
-        "rag_context": rag_context,
-        "rag_used": bool(rag_context),
         "token_usage": token_usage,
         "llm_raw": raw,
         **settings.model_snapshot(),
     }
+    llm_context = {
+        "rag_context": rag_context,
+        "rag_used": bool(rag_context),
+    }
     if parsed is not None:
-        return {"diagnosis": parsed.model_dump(), "llm_exchange": exchange}
+        return {
+            "diagnosis": parsed.model_dump(),
+            "llm_exchange": exchange,
+            "llm_context": llm_context,
+        }
     return {
         "diagnosis": {
             "error": "LLM did not return valid structured output",
             "raw": raw,
         },
         "llm_exchange": exchange,
+        "llm_context": llm_context,
     }
 
 
@@ -347,13 +354,22 @@ def run_live(live_url: str, case: dict, loki_url: str | None) -> dict:
         return {
             "diagnosis": {"error": "no report returned"},
             "llm_exchange": {},
+            "llm_context": {},
         }
     report = reports[0]
     diag = report.get("diagnosis", {})
     exchange = report.get("llm_exchange") or {}
+    llm_context = report.get("llm_context") or {}
     if "_rag_used" not in diag:
-        diag = {**diag, "_rag_used": report.get("evidence", {}).get("rag_used")}
-    return {"diagnosis": diag, "llm_exchange": exchange}
+        rag_flag = llm_context.get("rag_used")
+        if rag_flag is None:
+            rag_flag = report.get("evidence", {}).get("rag_used")
+        diag = {**diag, "_rag_used": rag_flag}
+    return {
+        "diagnosis": diag,
+        "llm_exchange": exchange,
+        "llm_context": llm_context,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -789,9 +805,11 @@ def main(argv: list[str] | None = None, *, workspace: Workspace | None = None) -
                 bundled = run_offline(model, case, include_rag=include_rag)
             diag = bundled.get("diagnosis") or bundled
             exchange = bundled.get("llm_exchange") or {}
+            llm_context = bundled.get("llm_context") or {}
         except Exception as exc:  # noqa: BLE001
             diag = {"error": f"run failed: {exc}"}
             exchange = {}
+            llm_context = {}
 
         if case.get("merged_from"):
             score = score_merged_case(case, diag)
@@ -805,19 +823,20 @@ def main(argv: list[str] | None = None, *, workspace: Workspace | None = None) -
             score["tokens_total"] = usage.get("total_tokens")
             score["tokens_in"] = usage.get("input_tokens")
             score["tokens_out"] = usage.get("output_tokens")
-        # Prefer llm_exchange (new agent); fall back to diagnosis/_rag_used for
-        # older live images that omit llm_exchange in the /alert response.
-        score["rag_used"] = bool(
-            exchange.get("rag_used")
-            if "rag_used" in exchange
-            else diag.get("_rag_used")
-        )
+        # Prefer llm_context (new); fall back to llm_exchange / diagnosis flags.
+        if "rag_used" in llm_context:
+            score["rag_used"] = bool(llm_context.get("rag_used"))
+        elif "rag_used" in exchange:
+            score["rag_used"] = bool(exchange.get("rag_used"))
+        else:
+            score["rag_used"] = bool(diag.get("_rag_used"))
 
         row = {
             "id": cid,
             "system": case.get("system"),
             "diagnosis": diag,
             "llm_exchange": exchange,
+            "llm_context": llm_context,
             "score": score,
         }
         if case.get("merged_from"):

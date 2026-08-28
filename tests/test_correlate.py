@@ -67,8 +67,10 @@ def test_correlate_structured_output_success():
 
     reported = nodes.report(out)
     exchange = reported["report"]["llm_exchange"]
-    assert exchange["rag_used"] is True
-    assert exchange["rag_context"] == "pool exhaustion runbook"
+    ctx = reported["report"]["llm_context"]
+    assert ctx["rag_used"] is True
+    assert ctx["rag_context"] == "pool exhaustion runbook"
+    assert "rag_context" not in exchange
     assert exchange["token_usage"]["total_tokens"] == 133
     assert exchange["user_prompt"] == out["llm_user_prompt"]
     assert exchange["chat_provider"]
@@ -76,6 +78,62 @@ def test_correlate_structured_output_success():
     assert exchange["embed_provider"]
     assert exchange["embed_model"]
     assert reported["report"]["models"]["chat_model"] == exchange["chat_model"]
+
+
+def test_correlate_tooluse_empty_content_stores_args_in_llm_raw():
+    diagnosis = Diagnosis(
+        primary_hypothesis=Hypothesis(
+            cause="upstream timeout",
+            confidence=70,
+            evidence="read timeout",
+        ),
+        secondary_hypotheses=[],
+        blast_radius_assessment="api-gateway",
+        suggested_next_steps=["Check platform-service latency"],
+        confidence_note="medium",
+    )
+    llm = MagicMock()
+    llm.invoke.return_value = {
+        "parsed": diagnosis,
+        "raw": AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "Diagnosis",
+                    "args": {
+                        "primary_hypothesis": {
+                            "cause": "upstream timeout",
+                            "confidence": 70,
+                        }
+                    },
+                    "id": "call-1",
+                    "type": "tool_call",
+                }
+            ],
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 77,
+                "total_tokens": 177,
+            },
+        ),
+    }
+    nodes = _nodes_with_llm(llm)
+    out = nodes.correlate(
+        {
+            "alert_type": "GatewayHighErrorRate",
+            "service": "api-gateway",
+            "severity": "warning",
+            "module_hint": "",
+            "dependencies": [],
+            "prom_data": {},
+            "loki_logs": [],
+            "rag_context": "",
+            "blast_radius": [],
+        }
+    )
+    assert out["llm_raw"]
+    assert "upstream timeout" in out["llm_raw"]
+    assert out["llm_token_usage"]["output_tokens"] == 77
 
 
 def test_correlate_structured_output_parse_failure(monkeypatch):
