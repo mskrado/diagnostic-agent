@@ -334,10 +334,11 @@ Wrote eval-results/blind-eval-20260721T0530Z.json
 ```
 
 Each run also writes a full JSON file (per-case diagnosis + **`llm_exchange`**
-with system/user prompts and token usage + score + aggregate) to
-`eval-results/` for later comparison. That folder is gitignored. Offline runs
-always have `rag_used=false` and empty `rag_context`; live runs mirror the
-agent's `report.llm_exchange` (so you can confirm RAG-off with `rag_used`).
+with system/user prompts and token usage + **`llm_context`** for RAG + score +
+aggregate) to `eval-results/` for later comparison. That folder is gitignored.
+Offline runs always have `rag_used=false` and empty `rag_context` under
+`llm_context`; live runs mirror the agent's `report.llm_context` /
+`report.llm_exchange` (confirm RAG-off via `llm_context.rag_used`).
 
 ### Measuring how much the runbooks help (RAG on vs off)
 

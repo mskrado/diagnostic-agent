@@ -95,7 +95,7 @@ cases:
       platform-service:
         heap_used_ratio: 0.94
     logs:
-      - '{"@timestamp":"2026-07-20T20:10:05.001Z","level":"WARN","logger_name":"com.publishi.platform.health.JvmHealthIndicator","service":"platform-service","trace_id":"89abcdef01234567","message":"High GC pause detected: young=812ms old=2410ms; heap used=1784MB/2048MB (87%); allocation rate elevated"}'
+      - '{"@timestamp":"2026-07-20T20:10:05.001Z","level":"WARN","logger_name":"com.example.platform.health.JvmHealthIndicator","service":"platform-service","trace_id":"89abcdef01234567","message":"High GC pause detected: young=812ms old=2410ms; heap used=1784MB/2048MB (87%); allocation rate elevated"}'
       - '{"@timestamp":"2026-07-20T20:10:18.440Z","level":"ERROR","logger_name":"org.springframework.boot.SpringApplication","service":"platform-service","trace_id":"9abcdef012345678","message":"Application run failed; nested exception is java.lang.OutOfMemoryError: Java heap space"}'
     expected:
       cause_keywords: [heap, memory, gc]
@@ -127,8 +127,8 @@ cases:
       severity: warning
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-20T20:11:22.331Z","level":"WARN","logger_name":"com.publishi.platform.security.LoginAttemptService","service":"platform-service","trace_id":"def0123456789abc","message":"Account locked after 5 failed login attempts for user=editor@example.com from ip=203.0.113.44"}'
-      - '{"@timestamp":"2026-07-20T20:11:24.010Z","level":"WARN","logger_name":"com.publishi.platform.security.LoginAttemptService","service":"platform-service","trace_id":"ef0123456789abcd","message":"Account locked after 5 failed login attempts for user=admin@example.com from ip=203.0.113.44"}'
+      - '{"@timestamp":"2026-07-20T20:11:22.331Z","level":"WARN","logger_name":"com.example.platform.security.LoginAttemptService","service":"platform-service","trace_id":"def0123456789abc","message":"Account locked after 5 failed login attempts for user=editor@example.com from ip=203.0.113.44"}'
+      - '{"@timestamp":"2026-07-20T20:11:24.010Z","level":"WARN","logger_name":"com.example.platform.security.LoginAttemptService","service":"platform-service","trace_id":"ef0123456789abcd","message":"Account locked after 5 failed login attempts for user=admin@example.com from ip=203.0.113.44"}'
       - '{"@timestamp":"2026-07-20T20:11:26.900Z","level":"WARN","logger_name":"org.springframework.security.oauth2.jwt.NimbusJwtDecoder","service":"platform-service","trace_id":"f0123456789abcde","message":"Failed to authenticate since the JWT was invalid; repeated 401s from ip=203.0.113.44"}'
     expected:
       cause_keywords: [brute, credential, login, authentication, security]
@@ -143,8 +143,8 @@ cases:
       severity: warning
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-20T20:13:01.100Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"23456789abcdef01","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=21s"}'
-      - '{"@timestamp":"2026-07-20T20:13:05.400Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"3456789abcdef012","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=33s"}'
+      - '{"@timestamp":"2026-07-20T20:13:01.100Z","level":"ERROR","logger_name":"com.example.platform.ai.OpenAiClient","service":"platform-service","trace_id":"23456789abcdef01","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=21s"}'
+      - '{"@timestamp":"2026-07-20T20:13:05.400Z","level":"ERROR","logger_name":"com.example.platform.ai.OpenAiClient","service":"platform-service","trace_id":"3456789abcdef012","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=33s"}'
     expected:
       cause_keywords: [openai, rate limit, "429", quota]
       must_reference: ["429", retry-after]
@@ -158,9 +158,9 @@ cases:
       severity: warning
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-24T05:43:50.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"a1b2c3d4e5f6789012345678abcdef01","message":"Failed to send template email to: user@example.com"}'
+      - '{"@timestamp":"2026-07-24T05:43:50.100Z","level":"ERROR","logger_name":"com.example.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"a1b2c3d4e5f6789012345678abcdef01","message":"Failed to send template email to: user@example.com"}'
       - '{"@timestamp":"2026-07-24T05:43:50.110Z","level":"ERROR","logger_name":"org.springframework.mail.MailSendException","service":"platform-service","trace_id":"a1b2c3d4e5f6789012345678abcdef01","message":"Mail server connection failed; nested exception is jakarta.mail.MessagingException: Could not connect to SMTP host: smtp-relay.gmail.com, port: 465; nested exception is java.net.ConnectException: Connection timed out"}'
-      - '{"@timestamp":"2026-07-24T05:43:52.220Z","level":"ERROR","logger_name":"com.publishi.notification.config.AsyncConfig","service":"platform-service","trace_id":"b2c3d4e5f6789012345678abcdef0123","message":"Async exception in method sendTemplate: SMTP send failed: 535 5.7.8 Authentication credentials invalid — check stored SMTP password / SETTINGS_ENCRYPTION_KEY"}'
+      - '{"@timestamp":"2026-07-24T05:43:52.220Z","level":"ERROR","logger_name":"com.example.notification.config.AsyncConfig","service":"platform-service","trace_id":"b2c3d4e5f6789012345678abcdef0123","message":"Async exception in method sendTemplate: SMTP send failed: 535 5.7.8 Authentication credentials invalid — check stored SMTP password / SETTINGS_ENCRYPTION_KEY"}'
     expected:
       cause_keywords: [smtp, email, mail, relay, authentication]
       must_reference: ["Could not connect to SMTP", "535"]
@@ -174,10 +174,10 @@ cases:
       severity: critical
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-19T15:16:04.854Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=smtp-relay.gmail.com, port=465, tls=true"}'
-      - '{"@timestamp":"2026-07-19T15:16:04.855Z","level":"WARN","logger_name":"com.publishi.platform.settings.service.SystemSettingsService","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Failed to apply DB email settings to mail sender: Cannot invoke \"org.springframework.mail.javamail.JavaMailSenderImpl.setHost(String)\" because \"sender\" is null"}'
-      - '{"@timestamp":"2026-07-19T15:16:05.010Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=mailpit, port=1025, tls=false"}'
-      - '{"@timestamp":"2026-07-24T05:43:43.200Z","level":"INFO","logger_name":"com.publishi.auth.service.AuthService","service":"platform-service","trace_id":"d4e5f6789012345678abcdef01234567","message":"MFA challenge initiated for user: admin@example.com (tenant: 00000000-0000-0000-0000-000000000000)"}'
+      - '{"@timestamp":"2026-07-19T15:16:04.854Z","level":"INFO","logger_name":"com.example.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=smtp-relay.gmail.com, port=465, tls=true"}'
+      - '{"@timestamp":"2026-07-19T15:16:04.855Z","level":"WARN","logger_name":"com.example.platform.settings.service.SystemSettingsService","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Failed to apply DB email settings to mail sender: Cannot invoke \"org.springframework.mail.javamail.JavaMailSenderImpl.setHost(String)\" because \"sender\" is null"}'
+      - '{"@timestamp":"2026-07-19T15:16:05.010Z","level":"INFO","logger_name":"com.example.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","trace_id":"c3d4e5f6789012345678abcdef012345","message":"Rebuilding mail sender: host=mailpit, port=1025, tls=false"}'
+      - '{"@timestamp":"2026-07-24T05:43:43.200Z","level":"INFO","logger_name":"com.example.auth.service.AuthService","service":"platform-service","trace_id":"d4e5f6789012345678abcdef01234567","message":"MFA challenge initiated for user: admin@example.com (tenant: 00000000-0000-0000-0000-000000000000)"}'
     expected:
       cause_keywords: [mailpit, mail sender, smtp, email settings, fallback]
       must_reference: ["Failed to apply DB email settings", mailpit]
@@ -191,9 +191,9 @@ cases:
       severity: critical
     metrics: {}
     logs:
-      - '{"@timestamp":"2026-07-24T05:40:00.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef0123456789012345678901","message":"Free disk space below threshold: path=/var/lib/docker free=20K total=30G (0%); writes may fail"}'
+      - '{"@timestamp":"2026-07-24T05:40:00.000Z","level":"ERROR","logger_name":"com.example.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef0123456789012345678901","message":"Free disk space below threshold: path=/var/lib/docker free=20K total=30G (0%); writes may fail"}'
       - '{"@timestamp":"2026-07-24T05:40:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef01234567890123456789012","message":"could not write to file: No space left on device"}'
-      - '{"@timestamp":"2026-07-24T05:41:00.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"89abcdef01234567890123456789013","message":"Failed to send template email to: user@example.com; nested exception is java.io.IOException: No space left on device"}'
+      - '{"@timestamp":"2026-07-24T05:41:00.100Z","level":"ERROR","logger_name":"com.example.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"89abcdef01234567890123456789013","message":"Failed to send template email to: user@example.com; nested exception is java.io.IOException: No space left on device"}'
       - '{"@timestamp":"2026-07-24T05:41:30.000Z","level":"ERROR","logger_name":"com.github.dockerjava.api.async.ResultCallbackTemplate","service":"platform-service","trace_id":"9abcdef01234567890123456789014","message":"OCI runtime exec failed: open /tmp/runc-process: no space left on device: unknown"}'
     expected:
       cause_keywords: [disk, space, filesystem, storage, enospc]

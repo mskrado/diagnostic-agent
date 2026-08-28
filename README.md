@@ -11,14 +11,20 @@ a pluggable LLM, and emits a structured diagnostic report.
 and runs only pre-approved, allowlisted actions in a locked-down sandbox. It is
 off unless a host deliberately turns it on.
 
-Integrating into *any* project means supplying a **workspace** — configuration
-and content that live in *your* repository — **not** forking this codebase.
+Integrating means holding a **client fork** of this repository: upstream product
+code plus your deployment under `client/`. Run `diag init` to scaffold compose,
+workspace, and start scripts; pull updates with `diag upgrade`.
+See **[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**.
+
+For throwaway bundles or CI-only workspaces without a fork, use `diag install`
+or mount an example workspace — see [docs/INTEGRATING.md](docs/INTEGRATING.md).
 
 ## Contents
 
 Topics in this README:
 
-- [Quick start — install against your stack](#quick-start--install-against-your-stack) — generate an agent + wiring bundle with `diag install`
+- [Quick start — client fork](#quick-start--client-fork) — `diag init` scaffolds `client/` in your private repo copy
+- [Quick start — install bundle](#quick-start--install-bundle-throwaway) — generate a throwaway bundle with `diag install`
 - [Quick start (hello-world workspace)](#quick-start-hello-world-workspace) — run the agent locally or in Docker against the bundled example
 - [Host workspace](#host-workspace) — manifest, profile files, preset chain, [fail-closed redaction](#redaction-is-fail-closed)
 - [Architecture](#architecture) — alert → LangGraph pipeline → route → report, plus [routing](#routing-opt-in) and [runbook execution](#runbook-execution-opt-in)
@@ -31,7 +37,8 @@ Additional documentation:
 
 | Document | Covers |
 |---|---|
-| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: interactive vs non-interactive, every collected parameter, generated files, troubleshooting |
+| [docs/CLIENT_FORK.md](docs/CLIENT_FORK.md) | **Client fork model**: private repo copy, `diag init`, start scripts, `diag upgrade`, offline packs |
+| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: parameters, generated files, **remote bundle deploy**, Docker image vs standalone `diag serve`, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
 | [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |
@@ -44,7 +51,20 @@ Additional documentation:
 | [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to propose changes and the community expectations |
 | [`examples/hello-world/`](examples/hello-world/) · [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) | Reference workspaces to copy and adapt |
 
-## Quick start — install against your stack
+## Quick start — client fork
+
+Mirror-clone this repo into your organization, then on the deployment host:
+
+```bash
+pip install -e ".[dev]"
+diag init
+cp client/agent/.env.example client/agent/.env   # fill secrets
+./client/scripts/start.sh
+```
+
+Full lifecycle (private copy, upgrades, air gap): **[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**
+
+## Quick start — install bundle (throwaway)
 
 Discover running observability tools and generate a complete agent + wiring
 bundle. Full guide (interactive vs non-interactive, every parameter):  
@@ -185,6 +205,27 @@ Delivery runs after the graph completes, on every route. Which channels fire
 depends on the route: PagerDuty opens an incident on `escalate`, Slack and email
 post the reasoning trace whenever they are enabled.
 
+### Deployment model: one agent per stack
+
+The agent is an **independent service** — it holds no knowledge of any
+application and reaches its data sources over plain HTTP. It is not, however, a
+multi-tenant service: **one running instance serves one stack.**
+
+That is deliberate. The profile, dependency map, redaction rules, RAG index, and
+LLM client are resolved once at startup from a single `AGENT_WORKSPACE` and
+cached for the process lifetime. Only the per-alert `service` label varies
+between requests.
+
+| | |
+|---|---|
+| **What you get** | Credentials, redaction rules, and the runbook index are scoped to one stack — a misconfigured workspace cannot leak another team's data or retrieve their runbooks |
+| **What it costs** | Several stacks means several instances, each with its own workspace, `.env`, and webhook URL |
+| **Serving many stacks from one process would need** | Per-alert profile routing, per-tenant RAG collections, per-stack credentials, and a tenant identity on the webhook — none of which exist today |
+
+Run one agent next to each observability stack, and give each its own workspace.
+See [docs/INSTALL.md](docs/INSTALL.md#run-the-agent-docker-image-or-standalone-process)
+for the runtime options.
+
 ### Routing (opt-in)
 
 Routing is off by default (`AGENT_ROUTING_ENABLED=false`), in which case
@@ -274,6 +315,8 @@ Every switch here defaults to off, so enabling them is always a deliberate act.
 | `AGENT_AUDIT_LOG_DIR` | `<repo>/audit` | JSONL audit records, one per diagnosis |
 | `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Needs `AGENT_GRAFANA_TOKEN` |
 | `AGENT_EMAIL_ENABLED` | `true` | With `AGENT_EMAIL_TO` and the `AGENT_SMTP_*` settings |
+| `AGENT_EMAIL_ATTACH_AUDIT` | `true` | Attach redacted audit JSON (`llm_raw` + prompts) to each diagnostic email; set `false` for body-only |
+| `AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES` | `262144` | Skip the attachment (email still sends) when the redacted JSON exceeds this size |
 | `AGENT_SLACK_ENABLED` | `false` | Posts the reasoning trace; needs `AGENT_SLACK_WEBHOOK_URL`. Optional `AGENT_SLACK_CHANNEL`, `AGENT_SLACK_USERNAME` |
 | `AGENT_PAGERDUTY_ENABLED` | `false` | Needs `AGENT_PAGERDUTY_API_TOKEN` and `AGENT_PAGERDUTY_FROM_EMAIL`; `AGENT_PAGERDUTY_SERVICE_ID` to open incidents |
 
@@ -288,10 +331,12 @@ image rather than writing their own scripts.
 
 | Command | Purpose |
 |---|---|
-| `diag install` | Discover a running stack and generate an agent + wiring bundle ([INSTALL.md](docs/INSTALL.md)) |
+| `diag init` | Scaffold a client deployment under `client/` ([CLIENT_FORK.md](docs/CLIENT_FORK.md)) |
+| `diag upgrade` | Merge an upstream release into your client fork |
+| `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md)) |
 | `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
 | `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
-| `diag doctor` | Probe Prometheus, Loki, Grafana, and SMTP connectivity |
+| `diag doctor` | Probe connectivity; `--check-fork` verifies no upstream-path drift |
 | `diag health-check` | Report the resolved workspace and profile health without a running server |
 | `diag e2e --url` | POST every scenario at a running agent and assert the report + redaction |
 | `diag eval blind` | Score LLM root-cause identification against the workspace dataset |

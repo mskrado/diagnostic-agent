@@ -1,8 +1,8 @@
 # diagnostic-agent SDLC Guide
 
-End-to-end software development lifecycle for **diagnostic-agent** — the same practice as [publishi.ai](https://github.com/mskrado/publishi.ai) (`docs/SDLC_GUIDE.md`), adapted for this Python agent repo (pytest / corpus lint, GHCR image, optional PyPI).
+End-to-end software development lifecycle for **diagnostic-agent** — pytest / corpus lint, GHCR image, optional PyPI, and the **client fork** deployment model ([docs/CLIENT_FORK.md](CLIENT_FORK.md)).
 
-Host projects (for example publishi.ai) keep **thin** workspace config under their tree and pin a published image. **Golden agent source lives here.**
+**Upstream** owns agent source, presets, and the default runbook corpus. **Clients** own everything under `client/` in their private fork.
 
 ---
 
@@ -40,17 +40,16 @@ Topics:
                     └────────────────┬────────────────┘
                                      │  image pin
                     ┌────────────────▼────────────────┐
-                    │     Host project workspace      │
-                    │  agent.yaml + profile/runbooks  │
-                    │  (e.g. publishi thin client)    │
+                    │     Client fork (private copy)  │
+                    │  client/workspace + client/agent  │
                     └─────────────────────────────────┘
 ```
 
 | Concern | Where it lives |
 |---------|----------------|
 | Agent runtime, tools, presets, default corpus | This repo (`mskrado/diagnostic-agent`) |
-| Host topology, redaction, runbooks, scenarios | Host workspace (see `docs/WORKSPACE.md`) |
-| Install / discover wiring | `docs/INSTALL.md` (`diag install`) |
+| Host topology, redaction, runbooks, scenarios, compose | **Client fork** `client/` (see `docs/CLIENT_FORK.md`) |
+| Install / discover wiring | `diag init` (client) or `diag install` (throwaway bundle) |
 
 ---
 
@@ -288,14 +287,14 @@ Host repos pin `agent_version` / image tag to the published semver (see `docs/IN
 
 ---
 
-## 8. Relationship to host repositories
+## 8. Relationship to client forks
 
 | Change | Land in |
 |--------|---------|
-| Agent code, presets, default runbooks, `diag` CLI, install scripts | **This repo** |
-| Host `agent.yaml`, service map, redaction, host runbooks, compose pins | **Host repo** (e.g. publishi.ai `infrastructure/diagnostic-agent/`) |
+| Agent code, presets, default runbooks, `diag` CLI, install scripts | **This repo (upstream)** |
+| Deployment workspace, service map, host runbooks, compose, `.env` | **Client fork** under `client/` |
 
-Do not re-vendor agent source into the host. Prefer pulling `ghcr.io/mskrado/diagnostic-agent:<tag>`.
+Clients mirror-clone this repo, run `diag init`, and merge upstream tags with `diag upgrade`. Do not edit upstream-owned paths in a client fork. Online hosts may pull `ghcr.io/mskrado/diagnostic-agent:<tag>` via `diag init --pull-image`; air-gapped hosts build from source (default).
 
 ---
 

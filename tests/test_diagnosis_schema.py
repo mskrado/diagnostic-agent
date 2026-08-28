@@ -59,7 +59,7 @@ def test_diagnosis_schema_accepts_tool_and_fix_fields():
         secondary_hypotheses=[],
         blast_radius_assessment="All DB-backed modules",
         suggested_next_steps=["Check postgres container health"],
-        tool_run_examples=["docker logs publishi-postgres --tail 100"],
+        tool_run_examples=["docker logs acme-postgres --tail 100"],
         fix_suggestions=["Restart postgres if container is exited."],
         confidence_note="high",
     )

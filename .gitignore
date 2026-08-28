@@ -15,3 +15,6 @@ replay-results/
 # Locally generated `diag install` bundles
 deploy/
 deploy-*/
+# Client deployment secrets (scaffolded by diag init)
+client/agent/.env
+client/**/install-report.json

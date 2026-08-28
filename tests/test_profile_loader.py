@@ -7,6 +7,7 @@ import pytest
 
 from app.profile import build_profile, list_presets, reset_profile_cache
 from app.profile.loader import load_preset
+from tests.test_vendor_neutral import BRAND_PATTERN
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SPRING = _ROOT / "examples" / "spring-modular-monolith"
@@ -105,7 +106,7 @@ def test_spring_modular_monolith_uses_micrometer_and_tenant_redaction():
     rule_names = {r.name for r in profile.redaction.rules}
     assert "tenant_token" in rule_names
     assert "platform-service" in profile.prompt.platform_description
-    assert "publishi" not in profile.prompt.platform_description.lower()
+    assert not BRAND_PATTERN.search(profile.prompt.platform_description)
     assert profile.logs.module_regex
     assert "SecurityAuthErrorsInLogs" in profile.logs.alert_line_filters
     assert profile.service_map_path and Path(profile.service_map_path).is_file()

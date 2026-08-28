@@ -3,7 +3,7 @@
 **Alert:** `<PromQL or Loki query>` for `<duration>`.
 
 ## Meaning
-<!-- What this alert indicates in publishi.ai terms (gateway, platform-service module, dependency). -->
+<!-- What this alert indicates in your stack's terms (gateway, service/module, dependency). -->
 
 ## First checks
 1. <!-- Grafana/Loki queries or Prometheus metrics to run first -->

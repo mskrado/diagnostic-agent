@@ -14,7 +14,7 @@ user inboxes**. Login still returns `MFA_REQUIRED`.
 1. Loki startup: `Failed to apply DB email settings to mail sender` (often
    `JavaMailSenderImpl.setHost(...) because "sender" is null`).
 2. Loki: `Rebuilding mail sender: host=mailpit` vs `host=smtp-relay.gmail.com`.
-3. Container env: `docker inspect publishi-platform` → `SMTP_HOST` / `SMTP_PORT`.
+3. Container env: `docker inspect <platform-service-container>` → `SMTP_HOST` / `SMTP_PORT`.
 4. RDS `system_settings` where `setting_key LIKE 'email.%'` (host/port/user).
 5. Mailpit UI / API (`SMTPAccepted` count): PINs may be trapped there on DEV;
    on PROD Mailpit must not be the live relay.
@@ -33,9 +33,9 @@ Alertmanager / diagnostic-agent SMTP paths are separate configs.
 
 ## Example log lines (synthetic)
 ```json
-{"@timestamp":"2026-07-19T15:16:04.854Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","message":"Rebuilding mail sender: host=smtp-relay.gmail.com, port=465, tls=true"}
-{"@timestamp":"2026-07-19T15:16:04.855Z","level":"WARN","logger_name":"com.publishi.platform.settings.service.SystemSettingsService","service":"platform-service","message":"Failed to apply DB email settings to mail sender: Cannot invoke \"org.springframework.mail.javamail.JavaMailSenderImpl.setHost(String)\" because \"sender\" is null"}
-{"@timestamp":"2026-07-19T15:16:05.010Z","level":"INFO","logger_name":"com.publishi.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","message":"Rebuilding mail sender: host=mailpit, port=1025, tls=false"}
+{"@timestamp":"2026-07-19T15:16:04.854Z","level":"INFO","logger_name":"com.example.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","message":"Rebuilding mail sender: host=smtp-relay.gmail.com, port=465, tls=true"}
+{"@timestamp":"2026-07-19T15:16:04.855Z","level":"WARN","logger_name":"com.example.platform.settings.service.SystemSettingsService","service":"platform-service","message":"Failed to apply DB email settings to mail sender: Cannot invoke \"org.springframework.mail.javamail.JavaMailSenderImpl.setHost(String)\" because \"sender\" is null"}
+{"@timestamp":"2026-07-19T15:16:05.010Z","level":"INFO","logger_name":"com.example.platform.settings.config.DynamicMailSenderConfig","service":"platform-service","message":"Rebuilding mail sender: host=mailpit, port=1025, tls=false"}
 ```
 
 ## Hypotheses-only

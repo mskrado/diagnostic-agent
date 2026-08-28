@@ -190,7 +190,7 @@ scenarios:
       severity: warning
     annotations:
       summary: Synthetic ContainerRestartLoop for runbook E2E
-      container_name: publishi-platform-service
+      container_name: platform-service
     rag_query: ContainerRestartLoop container restart crash loop OOM
     rag_must_contain:
       - restart

@@ -680,7 +680,7 @@ def test_collect_seeds_mailpit_smtp_from_container(no_llm_env, no_probe):
         ToolEndpoint(
             kind=ToolKind.MAILPIT,
             reachable=False,
-            container_name="publishi-mailpit",
+            container_name="acme-mailpit",
             published_port=8025,
         )
     )
@@ -691,7 +691,7 @@ def test_collect_seeds_mailpit_smtp_from_container(no_llm_env, no_probe):
         overrides={"chat_provider": "ollama"},
     )
     assert params.email_enabled is True
-    assert params.smtp_host == "publishi-mailpit"
+    assert params.smtp_host == "acme-mailpit"
     assert params.smtp_port == 1025
     assert params.smtp_starttls is False
     assert params.smtp_username == ""
@@ -774,10 +774,10 @@ def test_compose_pins_project_name_and_profile_dir(tmp_path: Path, no_llm_env, n
         overrides={"chat_provider": "ollama"},
     )
     package_root = Path(__file__).resolve().parent.parent
-    out = tmp_path / "publishi"
+    out = tmp_path / "acme"
     generate(output=out, report=report, params=params, package_root=package_root)
     compose = (out / "agent" / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "name: publishi-agent" in compose
+    assert "name: acme-agent" in compose
     assert "AGENT_PROFILE_DIR: /workspace" in compose
     assert "AGENT_RUNBOOKS_PATH: /workspace/runbooks" in compose
 

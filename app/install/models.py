@@ -149,6 +149,12 @@ class InstallParams:
     agent_image: str = "ghcr.io/mskrado/diagnostic-agent:latest"
     agent_host_port: int = 8001
     agent_container_name: str = "diagnostic-agent"
+    # Self-build / air-gapped client fork options (diag init).
+    base_image: str = "python:3.12-slim"
+    build_from_source: bool = False
+    pip_index_url: str = ""
+    pip_extra_index_url: str = ""
+    local_image_tag: str = "diagnostic-agent:local"
     webhook_url: str = "http://diagnostic-agent:8000/alert"
     docker_network: str = ""
     openai_api_key: str = ""
@@ -177,6 +183,13 @@ class InstallParams:
             if d.get(key):
                 d[key] = "***"
         return d
+
+
+def client_image_ref(params: InstallParams) -> str:
+    """Image reference for compose: local build tag or pulled image."""
+    if params.build_from_source:
+        return params.local_image_tag
+    return params.agent_image
 
 
 @dataclass

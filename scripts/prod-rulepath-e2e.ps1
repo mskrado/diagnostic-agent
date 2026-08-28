@@ -8,17 +8,20 @@
 # review Grafana / Mailpit / the agent afterward.
 #
 # Usage (from this repo root in PowerShell):
-#   .\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem
-#   .\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -OpenTunnels
+#   .\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix <your-compose-prefix>
+#   .\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix <your-compose-prefix> -OpenTunnels
 #   # Or via env: AGENT_E2E_SSH_TARGET / AGENT_E2E_SSH_IDENTITY / AGENT_E2E_CONTAINER_PREFIX
+#
+# The container prefix is required: container names are host-specific, so there
+# is no safe default to guess.
 #
 # Exit codes: 0 = PASS, 1 = FAIL / prerequisites.
 
 param(
     [string]$SshTarget = $(if ($env:AGENT_E2E_SSH_TARGET) { $env:AGENT_E2E_SSH_TARGET } else { "" }),
     [string]$IdentityFile = $(if ($env:AGENT_E2E_SSH_IDENTITY) { $env:AGENT_E2E_SSH_IDENTITY } else { (Join-Path $HOME ".ssh\id_rsa") }),
-    [string]$ContainerPrefix = $(if ($env:AGENT_E2E_CONTAINER_PREFIX) { $env:AGENT_E2E_CONTAINER_PREFIX } else { "publishi" }),
-    [string]$SmokeMarker = "PUBLISHI_SMOKE_MARKER",
+    [string]$ContainerPrefix = $env:AGENT_E2E_CONTAINER_PREFIX,
+    [string]$SmokeMarker = $(if ($env:AGENT_E2E_SMOKE_MARKER) { $env:AGENT_E2E_SMOKE_MARKER } else { "DIAGNOSTIC_AGENT_SMOKE_MARKER" }),
     [string]$AgentContainer = "",
     [string]$PromtailContainer = "",
     [string]$LokiContainer = "",
@@ -38,6 +41,10 @@ param(
     [int]$RemoteMailpitPort = 8025,
     [int]$RemoteAlertmanagerPort = 9093
 )
+
+if (-not $ContainerPrefix) {
+    throw "-ContainerPrefix is required (or set AGENT_E2E_CONTAINER_PREFIX). It is your compose project prefix, e.g. containers named <prefix>-loki, <prefix>-diagnostic-agent."
+}
 
 if (-not $AgentContainer) { $AgentContainer = "$ContainerPrefix-diagnostic-agent" }
 if (-not $PromtailContainer) { $PromtailContainer = "$ContainerPrefix-promtail" }

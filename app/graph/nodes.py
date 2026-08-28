@@ -22,7 +22,7 @@ from ..dependency_map import DependencyMap
 from ..execution.classifier import classify
 from ..execution.runbook import load_executable_runbooks, select_runbook
 from ..execution.sandbox import Sandbox
-from ..llm import content_to_text, invoke_structured_diagnosis
+from ..llm import format_llm_raw, invoke_structured_diagnosis
 from ..llm_usage import extract_token_usage
 from ..profile import get_profile
 from ..rag.store import RagStore
@@ -226,7 +226,7 @@ class DiagnosticNodes:
             )
             parsed = result.get("parsed") if isinstance(result, dict) else None
             raw_msg = result.get("raw") if isinstance(result, dict) else None
-            raw = content_to_text(getattr(raw_msg, "content", ""))
+            raw = format_llm_raw(raw_msg)
             token_usage = extract_token_usage(raw_msg)
             if parsed is not None:
                 hypotheses = parsed.model_dump()
@@ -288,13 +288,16 @@ class DiagnosticNodes:
             },
             # Chat/embed ids for email + audit (also mirrored on llm_exchange).
             "models": settings.model_snapshot(),
-            # Full prompts + tokens for RAG effectiveness / cost (also in audit JSONL).
+            # Retrieval context only (not model output — that is llm_raw / audit).
+            "llm_context": {
+                "rag_context": rag_ctx,
+                "rag_used": bool(rag_ctx),
+            },
+            # Prompts + tokens for cost / replay (RAG lives under llm_context).
             "llm_exchange": {
                 "system_prompt": state.get("llm_system_prompt")
                 or build_system_prompt(),
                 "user_prompt": state.get("llm_user_prompt") or "",
-                "rag_context": rag_ctx,
-                "rag_used": bool(rag_ctx),
                 "token_usage": state.get("llm_token_usage")
                 or extract_token_usage(None),
                 **settings.model_snapshot(),

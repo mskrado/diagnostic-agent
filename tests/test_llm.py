@@ -77,6 +77,34 @@ def test_content_to_text_handles_bedrock_blocks_and_none():
     )
 
 
+def test_format_llm_raw_prefers_tool_call_args_when_content_empty():
+    from langchain_core.messages import AIMessage
+
+    raw = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "Diagnosis",
+                "args": {
+                    "primary_hypothesis": {
+                        "cause": "upstream timeout",
+                        "confidence": 70,
+                    }
+                },
+                "id": "call-1",
+                "type": "tool_call",
+            }
+        ],
+        usage_metadata={"input_tokens": 10, "output_tokens": 77, "total_tokens": 87},
+    )
+    out = llm_mod.format_llm_raw(raw)
+    assert out
+    assert "upstream timeout" in out
+    assert "primary_hypothesis" in out
+    assert llm_mod.format_llm_raw(None) == ""
+    assert llm_mod.format_llm_raw(AIMessage(content="plain text")) == "plain text"
+
+
 def test_is_tooluse_model_error():
     assert llm_mod.is_tooluse_model_error(
         Exception(

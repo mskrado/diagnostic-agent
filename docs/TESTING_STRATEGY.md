@@ -6,6 +6,8 @@ test proves, what must be configured for it to run, and which ones are safe to
 point at production. For copy-paste operator recipes see
 [TESTING.md](TESTING.md).
 
+Examples use `acme` as a stand-in compose project prefix; substitute your own.
+
 The agent is unusual in two ways that shape the strategy:
 
 1. **It is config-driven.** Most production defects are workspace/profile
@@ -69,8 +71,17 @@ install collection, and workspace resolution.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q
+python -m pytest -q
 ```
+
+Prefer module forms over bare console scripts. On Windows (and some user-site
+`pip install` layouts), `pytest` / `diag` are often missing from `PATH` even
+though the package is installed:
+
+| Wanted | Reliable form |
+|---|---|
+| `pytest …` | `python -m pytest …` |
+| `diag …` | `python -m app.cli …` |
 
 Configure: nothing. `tests/conftest.py` pins the bundled
 `examples/spring-modular-monolith` profile so tests do not depend on a host
@@ -87,7 +98,7 @@ profile/preset resolution chain, that redaction resolves to ≥1 rule
 and that the service topology parses.
 
 ```bash
-diag validate -w examples/hello-world
+python -m app.cli validate -w examples/hello-world
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<pinned-tag> diag validate
 ```
@@ -102,8 +113,8 @@ grounding (expected keywords actually appear in the case's injected logs), and
 the hypotheses-only framing invariant.
 
 ```bash
-diag lint
-diag lint -w /path/to/host/workspace
+python -m app.cli lint
+python -m app.cli lint -w /path/to/host/workspace
 ```
 
 Configure: workspace with `runbooks/`, `scenarios.yaml`, and (optionally) a blind
@@ -118,8 +129,8 @@ is forced on for the run and restored after, so results do not depend on
 `AGENT_ROUTING_ENABLED`.
 
 ```bash
-diag replay
-diag replay --only redis-connection-errors
+python -m app.cli replay
+python -m app.cli replay --only redis-connection-errors
 ```
 
 Configure: `scenarios.yaml`, optionally with a `replay:` block pinning
@@ -162,7 +173,7 @@ diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:310
 The workspace flag belongs to `eval`, before the `blind` subcommand:
 
 ```bash
-python -m app.cli eval -w ./deploy/publishi.ai/agent/workspace blind --limit 3
+python -m app.cli eval -w ./deploy/acme/agent/workspace blind --limit 3
 ```
 
 Configure: `AGENT_CHAT_PROVIDER` / `AGENT_CHAT_MODEL` plus provider credentials
@@ -185,11 +196,11 @@ tenant identifiers in that audit line**, both emails in Mailpit, and the Grafana
 annotation when a token is configured.
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -DirectAgent
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -DirectAgent
 ```
 
 ```bash
-./scripts/smoke-test.sh -ContainerPrefix publishi
+./scripts/smoke-test.sh -ContainerPrefix acme
 ```
 
 Configure: `-ContainerPrefix` (or `AGENT_E2E_CONTAINER_PREFIX`) matching the host
@@ -208,12 +219,12 @@ because `-RulePath` talks to the **local** Docker daemon and HTTP tunnels cannot
 carry `docker run` / `docker exec`:
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RulePath
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RulePath
 
 .\scripts\prod-rulepath-e2e.ps1 `
   -SshTarget ec2-user@YOUR_HOST `
   -IdentityFile $HOME\.ssh\your-key.pem `
-  -ContainerPrefix publishi
+  -ContainerPrefix acme
 ```
 
 Configure: Promtail scraping container stdout, a Loki ruler group defining the
@@ -245,7 +256,7 @@ and produce an audit record. This is the only layer that validates the host's
 *production* alert rules rather than a synthetic marker.
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RealPath
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RealPath
 ```
 
 **Never run against production.** It causes real downtime and real pages.
@@ -331,17 +342,17 @@ ones pass.
 ```powershell
 # 0. Read-only: is the deployment healthy and correctly wired?
 curl.exe http://127.0.0.1:8001/health
-ssh -i $HOME\.ssh\key.pem ec2-user@HOST "docker exec publishi-diagnostic-agent diag doctor"
+ssh -i $HOME\.ssh\key.pem ec2-user@HOST "docker exec acme-diagnostic-agent diag doctor"
 
 # 1. Read-only: does the deployed workspace still validate?
 ssh -i $HOME\.ssh\key.pem ec2-user@HOST `
-  "docker exec publishi-diagnostic-agent sh -c 'diag validate && diag lint'"
+  "docker exec acme-diagnostic-agent sh -c 'diag validate && diag lint'"
 
 # 2. Agent-only diagnosis path (one LLM call, no Alertmanager email)
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -AgentUrl http://localhost:8001 -DirectAgent
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -AgentUrl http://localhost:8001 -DirectAgent
 
 # 3. Full reactive chain via the marker rule
-.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix publishi
+.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix acme
 
 # 4. Scenario coverage (scope it — every scenario is an LLM call)
 python scripts\runbook-e2e.py -w C:\path\to\host\workspace --mode live --scenario high-error-rate
@@ -407,9 +418,9 @@ on *every* pull request that touches a workspace — including host repos.
 
 | Layer | Pass criteria |
 |---|---|
-| L1 | `pytest -q` exits 0 |
-| L2 | `diag validate` exits 0; redaction rule count as expected |
-| L3 | `diag lint` exits 0 |
+| L1 | `python -m pytest -q` exits 0 |
+| L2 | `python -m app.cli validate` exits 0; redaction rule count as expected |
+| L3 | `python -m app.cli lint` exits 0 |
 | L4 | `pass_rate` 1.0 (any failure is a real routing regression) |
 | L5 | Every probe reachable, or a deliberate, documented skip |
 | L6 | No regression versus the previous run: `identified_accuracy`, `mean_keyword_recall`, `mean_judge_score`; `no-signal-control` still low-confidence |

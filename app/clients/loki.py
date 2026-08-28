@@ -1,8 +1,9 @@
 """Read-only Grafana Loki HTTP API client.
 
-publishi.ai's Promtail pipeline promotes `service`, `level` and `tenantId` to
-Loki labels and keeps the full Spring Boot JSON line as the log message. So a
-typical query is:  {service="platform-service"} | json | level=~"ERROR|WARN"
+Queries assume the shipper (Promtail/Alloy) promotes low-cardinality fields such
+as `service` and `level` to Loki labels and keeps the full structured JSON line
+as the log message, e.g.:  {service="platform-service"} | json | level=~"ERROR|WARN"
+The host's own label plane is declared in the workspace profile, not here.
 """
 from __future__ import annotations
 

@@ -20,8 +20,8 @@ The `media` module cannot upload or serve objects. Uploads fail; existing URLs m
 
 ## Example log lines (synthetic)
 ```json
-{"@timestamp":"2026-07-20T20:13:15.200Z","level":"ERROR","logger_name":"com.publishi.platform.media.S3MediaStorage","service":"platform-service","trace_id":"3456789abcdef01234567890123456789","message":"S3 putObject failed: AmazonS3Exception: The specified bucket does not exist (Service: Amazon S3; Status Code: 404; Error Code: NoSuchBucket)"}
-{"@timestamp":"2026-07-20T20:13:18.640Z","level":"ERROR","logger_name":"com.publishi.platform.media.S3MediaStorage","service":"platform-service","trace_id":"456789abcdef012345678901234567891","message":"S3 getObject failed: AmazonS3Exception: Access Denied (Status Code: 403; Error Code: AccessDenied) — check IAM credentials"}
+{"@timestamp":"2026-07-20T20:13:15.200Z","level":"ERROR","logger_name":"com.example.platform.media.S3MediaStorage","service":"platform-service","trace_id":"3456789abcdef01234567890123456789","message":"S3 putObject failed: AmazonS3Exception: The specified bucket does not exist (Service: Amazon S3; Status Code: 404; Error Code: NoSuchBucket)"}
+{"@timestamp":"2026-07-20T20:13:18.640Z","level":"ERROR","logger_name":"com.example.platform.media.S3MediaStorage","service":"platform-service","trace_id":"456789abcdef012345678901234567891","message":"S3 getObject failed: AmazonS3Exception: Access Denied (Status Code: 403; Error Code: AccessDenied) — check IAM credentials"}
 ```
 
 ## Hypotheses-only
