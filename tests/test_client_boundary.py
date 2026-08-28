@@ -36,6 +36,37 @@ def test_upstream_ships_empty_client_directory():
     )
 
 
+def test_shipped_shell_scripts_are_lf_only():
+    """CRLF makes a script unrunnable on the Linux hosts clients deploy to.
+
+    .gitattributes enforces this on checkout; this guards the stored blobs in
+    case a contributor commits with those attributes bypassed.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "*.sh"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("git unavailable")
+
+    offenders = []
+    for rel in listing.stdout.split():
+        blob = subprocess.run(
+            ["git", "cat-file", "blob", f"HEAD:{rel}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            timeout=30,
+        )
+        if b"\r\n" in blob.stdout:
+            offenders.append(rel)
+    assert not offenders, f"CRLF line endings in shipped shell scripts: {offenders}"
+
+
 def test_is_upstream_owned_classification():
     assert is_upstream_owned("app/cli.py")
     assert is_upstream_owned("runbooks/runbook-high-error-rate.md")

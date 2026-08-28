@@ -303,10 +303,26 @@ def _run_install_core(
     return 0, output, params, report
 
 
+# Only build/packaging knobs may be force-applied after collect(). Everything
+# else (preset, URLs, ports) is already resolved by collect(), which normalises
+# sentinel values -- blanket-applying overrides would write back the raw CLI
+# input and turn `--preset auto` into a literal `extends: auto`.
+_FORCED_OVERRIDE_KEYS = frozenset(
+    {
+        "agent_image",
+        "base_image",
+        "build_from_source",
+        "local_image_tag",
+        "pip_extra_index_url",
+        "pip_index_url",
+    }
+)
+
+
 def _apply_param_overrides(params: InstallParams, overrides: dict[str, Any]) -> None:
     valid = {f.name for f in fields(InstallParams)}
     for key, value in overrides.items():
-        if key in valid and value is not None:
+        if key in _FORCED_OVERRIDE_KEYS and key in valid and value is not None:
             setattr(params, key, value)
 
 

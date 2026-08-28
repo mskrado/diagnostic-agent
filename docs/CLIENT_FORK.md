@@ -42,6 +42,7 @@ This discovers Prometheus/Loki/Grafana/Alertmanager (and optional Ollama), write
 | `client/agent/` | Docker Compose, `.env`, build context |
 | `client/observability/` | Prometheus/Alertmanager/Promtail snippets to merge |
 | `client/scripts/` | `start.sh`, `stop.sh`, `status.sh`, `logs.sh`, `start.ps1` |
+| `client/systemd/` | `diagnostic-agent.service` for standalone (non-Docker) runs |
 | `client/docs/OPERATIONS.md` | Seeded operational notes |
 | `client/.upstream-version` | Upstream release marker |
 | `client/.github/workflows/client-validate.yml` | CI for your workspace |
@@ -60,6 +61,8 @@ diag init --pip-index-url https://pypi.internal/simple/
 ```
 
 Default **`diag init` builds from source** (`diagnostic-agent:local`) so air-gapped and internal-mirror hosts never need GHCR.
+
+The generated build uses the **repo root as its Docker build context** (`context: ../..`, `dockerfile: client/agent/Dockerfile`), because the image is built from `app/`, `runbooks/` and `requirements.lock`. Deploy the whole fork to the host — copying only `client/` gives you a compose file that cannot build. Use `--pull-image` if you would rather ship just the workspace and pull a prebuilt image.
 
 ## 3. Start the agent
 
@@ -97,7 +100,9 @@ diag upgrade --target v1.2.0
 ./client/scripts/start.sh
 ```
 
-`diag upgrade` refuses to proceed if upstream-owned files were modified locally. It updates `client/.upstream-version` and prints corpus diffs (`runbooks/`, presets) so you can port improvements into `client/workspace/runbooks/` deliberately.
+`diag upgrade` refuses to proceed if upstream-owned files were modified locally. It updates `client/.upstream-version` and prints corpus diffs (`runbooks/`, presets) so you can port improvements into `client/workspace/runbooks/` deliberately. Use `--skip-drift-check` only when you have accepted the conflicts you are about to get.
+
+The drift check compares your working tree against `HEAD`, so it catches edits you have not committed. If you deliberately commit a patch to an upstream path, the check stays quiet and `git merge` reports the conflict instead — expected, but it is why carrying local patches is discouraged. Upstream fixes belong in a PR to this repo; everything host-specific belongs under `client/`.
 
 ### Offline (true air gap)
 
@@ -133,8 +138,18 @@ Never commit:
 ## 7. Reproducible builds
 
 - **`requirements.lock`** — pinned deps; CI fails if it drifts from `requirements.txt`.
-- **`BASE_IMAGE`** — pin Python base by digest in compose `build.args` for production.
-- **`PIP_INDEX_URL`** — point builds at an internal PyPI proxy.
+- **`BASE_IMAGE`** — the Python base image. Pin it by digest for production.
+- **`PIP_INDEX_URL`** / **`PIP_EXTRA_INDEX_URL`** — point builds at an internal PyPI proxy.
+
+The generated compose reads all three from `client/agent/.env`, so set them there rather than editing the compose file — that survives a re-run of `diag init`:
+
+```bash
+# client/agent/.env
+BASE_IMAGE=python:3.12-slim@sha256:<digest>
+PIP_INDEX_URL=https://pypi.internal/simple/
+```
+
+Empty or unset index URLs mean "use the public PyPI index".
 
 ## Related
 

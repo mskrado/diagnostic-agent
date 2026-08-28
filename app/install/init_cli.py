@@ -141,14 +141,19 @@ def run_init(args: argparse.Namespace) -> int:
         print(f"Upstream version recorded: {upstream_version} -> {output_path / '.upstream-version'}")
         print("\nClient fork next steps")
         print("----------------------")
-        print("  1. Review client/workspace/service_map.yaml")
-        print("  2. cp client/agent/.env.example client/agent/.env  (if .env missing)")
-        print("  3. ./client/scripts/start.sh")
-        print("  4. Commit client/ to your private repo (never commit .env)")
-        print("\nSee docs/CLIENT_FORK.md for upgrades and offline packs.")
+        print(f"  1. Review  {output_path / 'workspace' / 'service_map.yaml'}")
+        print(f"  2. Copy    {output_path / 'agent' / '.env.example'} -> "
+              f"{output_path / 'agent' / '.env'}  (if .env missing)")
+        print(f"  3. Start   {output_path / 'scripts' / 'start.sh'}")
+        print(f"  4. Health  curl -sf http://127.0.0.1:{params.agent_host_port}/health")
+        print(f"  5. Wire    merge {output_path / 'observability'} into your live stack")
+        print(f"  6. Commit  {output_path}/ to your private repo (never commit .env)")
+        print(f"\nFull instructions: {output_path / 'APPLY.md'}")
+        print("Upgrades and offline packs: docs/CLIENT_FORK.md")
+        if report.warnings:
+            print("\nWarnings to resolve before the agent can diagnose:")
+            for w in report.warnings:
+                print(f"  ! {w}")
     else:
         print(f"DRY-RUN would scaffold {len(extras)} client extras")
-
-    if not args.dry_run:
-        _print_next_steps(output_path, params, report)
     return 0

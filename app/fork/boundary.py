@@ -22,6 +22,8 @@ UPSTREAM_OWNED_PATHS: frozenset[str] = frozenset(
         "requirements-dev.txt",
         "requirements.lock",
         ".gitignore",
+        ".gitattributes",
+        ".dockerignore",
         ".env.example",
         "README.md",
         "LICENSE",
@@ -41,7 +43,13 @@ UPSTREAM_CLIENT_ALLOWLIST: frozenset[str] = frozenset(
 
 def is_upstream_owned(rel_path: str) -> bool:
     """Return True if *rel_path* is owned by upstream (not client/)."""
-    normalized = rel_path.replace("\\", "/").lstrip("./")
+    # Strip a leading "./" as a prefix, not as a character set: lstrip("./")
+    # also eats the dot of every dotfile, which hid .github/, .gitignore and
+    # .env.example from the drift check entirely.
+    normalized = rel_path.replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = normalized.lstrip("/")
     if normalized.startswith(f"{CLIENT_DIR}/"):
         return normalized in UPSTREAM_CLIENT_ALLOWLIST
     top = normalized.split("/", 1)[0]

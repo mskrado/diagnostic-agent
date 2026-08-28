@@ -1,0 +1,10 @@
+# Shell scripts and the systemd unit are executed on Linux hosts. A contributor
+# with core.autocrlf=false on Windows would otherwise commit CRLF and make them
+# unrunnable ("bad interpreter" / "unexpected end of file").
+*.sh text eol=lf
+*.service text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.ps1 text eol=crlf

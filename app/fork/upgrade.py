@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from app.fork.boundary import CLIENT_DIR
-from app.fork.drift import find_upstream_drift, read_upstream_version
+from app.fork.drift import DriftCheckError, find_upstream_drift, read_upstream_version
 
 
 def _run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -74,6 +75,7 @@ def run_upgrade(
     from_pack: Path | None = None,
     skip_drift_check: bool = False,
     dry_run: bool = False,
+    fetch_remote: bool = True,
 ) -> int:
     """Fetch and merge an upstream release tag into the current branch."""
     repo_root = repo_root.resolve()
@@ -81,7 +83,16 @@ def run_upgrade(
     current = read_upstream_version(client_dir)
 
     if not skip_drift_check:
-        drift = find_upstream_drift(repo_root)
+        try:
+            drift = find_upstream_drift(repo_root)
+        except DriftCheckError as exc:
+            print(
+                f"ERROR: could not verify fork drift: {exc}\n"
+                "Re-run inside the fork's git checkout, or pass --skip-drift-check "
+                "to upgrade without the safety net.",
+                file=sys.stderr,
+            )
+            return 1
         if drift:
             print(
                 "ERROR: upstream-owned paths were modified locally. Revert them "
@@ -98,24 +109,30 @@ def run_upgrade(
             repo_root, from_pack, client_dir, current, dry_run=dry_run
         )
 
-    if not _remote_exists(repo_root, remote):
-        print(
-            f"ERROR: git remote '{remote}' not found. Add it:\n"
-            f"  git remote add {remote} https://github.com/mskrado/diagnostic-agent.git",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        fetch = _run(["git", "fetch", remote, "--tags"], repo_root)
-        if fetch.returncode != 0:
-            print(fetch.stderr or fetch.stdout, file=sys.stderr)
+    # Offline packs have already loaded the tags into the local repo, so an
+    # air-gapped host must not be forced through a network fetch here.
+    if fetch_remote:
+        if not _remote_exists(repo_root, remote):
+            print(
+                f"ERROR: git remote '{remote}' not found. Add it:\n"
+                f"  git remote add {remote} https://github.com/mskrado/diagnostic-agent.git",
+                file=sys.stderr,
+            )
             return 1
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f"fetch failed: {exc}", file=sys.stderr)
-        return 1
+
+        try:
+            fetch = _run(["git", "fetch", remote, "--tags"], repo_root, check=False)
+            if fetch.returncode != 0:
+                print(fetch.stderr or fetch.stdout, file=sys.stderr)
+                return 1
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"fetch failed: {exc}", file=sys.stderr)
+            return 1
 
     merge_ref = target.strip()
+    if not merge_ref and not fetch_remote:
+        print("ERROR: no target ref resolved from the offline pack", file=sys.stderr)
+        return 1
     if not merge_ref:
         try:
             proc = _run(
@@ -196,18 +213,28 @@ def _upgrade_from_pack(
         return 0
 
     try:
-        _run(["git", "fetch", str(bundle), "refs/tags/*:refs/tags/*"], repo_root)
-        tags = _run(["git", "tag", "--sort=-v:refname"], repo_root)
+        fetch = _run(
+            ["git", "fetch", str(bundle), "refs/tags/*:refs/tags/*"],
+            repo_root,
+            check=False,
+        )
+        if fetch.returncode != 0:
+            print(fetch.stderr or fetch.stdout, file=sys.stderr)
+            return 1
+        tags = _run(["git", "tag", "--sort=-v:refname"], repo_root, check=False)
         latest = tags.stdout.splitlines()[0] if tags.stdout.strip() else ""
         if not latest:
             print("ERROR: bundle contained no tags", file=sys.stderr)
             return 1
+        # Drift was already checked by the caller; re-running it would only
+        # repeat the work, and fetch_remote=False keeps this host offline.
         return run_upgrade(
             repo_root=repo_root,
             target=latest,
             client_dir=client_dir,
-            skip_drift_check=False,
+            skip_drift_check=True,
             dry_run=False,
+            fetch_remote=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"offline upgrade failed: {exc}", file=sys.stderr)

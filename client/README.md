@@ -14,7 +14,9 @@ That discovers your observability stack and writes:
 |------|---------|
 | `workspace/` | Profiles, service map, runbooks, scenarios |
 | `agent/` | Docker Compose, `.env`, image build context |
+| `observability/` | Prometheus/Alertmanager/Promtail snippets to merge into your live stack |
 | `scripts/` | `start`, `stop`, `status`, `logs` helpers |
+| `systemd/` | Unit file for running the agent standalone, without Docker |
 | `docs/` | Your operational notes (seeded from discovery) |
 | `.upstream-version` | Upstream release this copy was initialized from |
 

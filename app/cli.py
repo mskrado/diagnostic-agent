@@ -182,11 +182,19 @@ def _probe_http(name: str, url: str) -> tuple[bool, str]:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     if getattr(args, "check_fork", False):
-        from app.fork.drift import find_upstream_drift, read_upstream_version
+        from app.fork.drift import (
+            DriftCheckError,
+            find_upstream_drift,
+            read_upstream_version,
+        )
         from app.fork.boundary import CLIENT_DIR
 
         repo_root = Path(__file__).resolve().parent.parent
-        drift = find_upstream_drift(repo_root)
+        try:
+            drift = find_upstream_drift(repo_root)
+        except DriftCheckError as exc:
+            print(f"FAIL could not verify fork drift: {exc}", file=sys.stderr)
+            return 1
         version = read_upstream_version(repo_root / CLIENT_DIR)
         print(f"upstream_version={version or '(none)'}")
         if drift:

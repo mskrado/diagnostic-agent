@@ -210,9 +210,12 @@ def _dockerfile(params: InstallParams, client_layout: bool = False) -> str:
 # Build context is the repo root ({context}). Compose passes BASE_IMAGE and
 # optional PIP_INDEX_URL for internal mirrors.
 ARG BASE_IMAGE={params.base_image}
+FROM ${{BASE_IMAGE}}
+
+# Re-declared after FROM: ARGs above the first FROM are global scope and are not
+# visible inside a build stage. Empty means "use the public index".
 ARG PIP_INDEX_URL=
 ARG PIP_EXTRA_INDEX_URL=
-FROM ${{BASE_IMAGE}}
 
 ENV PYTHONUNBUFFERED=1 \\
     PYTHONDONTWRITEBYTECODE=1 \\
@@ -222,17 +225,22 @@ ENV PYTHONUNBUFFERED=1 \\
 WORKDIR /app
 
 COPY requirements.txt requirements.lock* ./
-RUN if [ -f requirements.lock ]; then \\
-      pip install --no-cache-dir -r requirements.lock; \\
+RUN set -eu; \\
+    mirror=""; \\
+    if [ -n "$PIP_INDEX_URL" ]; then mirror="$mirror --index-url $PIP_INDEX_URL"; fi; \\
+    if [ -n "$PIP_EXTRA_INDEX_URL" ]; then mirror="$mirror --extra-index-url $PIP_EXTRA_INDEX_URL"; fi; \\
+    echo "$mirror" > /tmp/pip-mirror; \\
+    if [ -f requirements.lock ]; then \\
+      pip install --no-cache-dir $mirror -r requirements.lock; \\
     else \\
-      pip install --no-cache-dir -r requirements.txt; \\
+      pip install --no-cache-dir $mirror -r requirements.txt; \\
     fi
 
 COPY app/ ./app/
 COPY examples/ ./examples/
 COPY runbooks/ ./runbooks/
 COPY pyproject.toml requirements-dev.txt README.md ./
-RUN pip install --no-cache-dir --no-deps -e .
+RUN pip install --no-cache-dir --no-deps $(cat /tmp/pip-mirror) -e . && rm -f /tmp/pip-mirror
 
 RUN useradd --create-home --uid 10001 agent \\
     && mkdir -p /app/audit /app/chroma_db /workspace \\
@@ -309,14 +317,15 @@ networks:
     if params.build_from_source:
         ctx = "../.." if client_layout else ".."
         df = "client/agent/Dockerfile" if client_layout else "agent/Dockerfile"
-        build_block = f"""    build:
-      context: {ctx}
-      dockerfile: {df}
-      args:
-        BASE_IMAGE: ${{'BASE_IMAGE:-{params.base_image}'}}
-        PIP_INDEX_URL: ${{'PIP_INDEX_URL:-'}}
-        PIP_EXTRA_INDEX_URL: ${{'PIP_EXTRA_INDEX_URL:-'}}
-"""
+        build_block = (
+            "    build:\n"
+            f"      context: {ctx}\n"
+            f"      dockerfile: {df}\n"
+            "      args:\n"
+            f"        BASE_IMAGE: ${{BASE_IMAGE:-{params.base_image}}}\n"
+            "        PIP_INDEX_URL: ${PIP_INDEX_URL:-}\n"
+            "        PIP_EXTRA_INDEX_URL: ${PIP_EXTRA_INDEX_URL:-}\n"
+        )
         service_image = f"    image: {image_ref}\n"
     else:
         service_image = f"    image: ${{DIAGNOSTIC_AGENT_IMAGE:-{params.agent_image}}}\n"
@@ -404,11 +413,18 @@ def _env_file(params: InstallParams) -> str:
         f"DIAGNOSTIC_AGENT_IMAGE={client_image_ref(params)}",
     ]
     if params.build_from_source:
+        # Compose interpolates these into build.args. Ship the mirror keys as
+        # commented placeholders so air-gapped operators can find them.
+        lines.append("# Build args -- pin BASE_IMAGE by digest for production.")
         lines.append(f"BASE_IMAGE={params.base_image}")
         if params.pip_index_url:
             lines.append(f"PIP_INDEX_URL={params.pip_index_url}")
+        else:
+            lines.append("# PIP_INDEX_URL=https://pypi.internal/simple/")
         if params.pip_extra_index_url:
             lines.append(f"PIP_EXTRA_INDEX_URL={params.pip_extra_index_url}")
+        else:
+            lines.append("# PIP_EXTRA_INDEX_URL=")
     if params.openai_api_key:
         lines.append(f"OPENAI_API_KEY={params.openai_api_key}")
     if params.anthropic_api_key:
