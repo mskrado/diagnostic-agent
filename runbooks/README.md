@@ -5,6 +5,19 @@ Markdown corpus for RAG (`AGENT_RAG_ENABLED=true`). The agent chunks files at
 the log sample (`AGENT_RAG_TOP_K` chunks each, capped by `AGENT_RAG_MAX_CHUNKS`)
 so mixed incidents can surface postgres + redis + JVM runbooks together.
 
+## This is a reference corpus, not your corpus
+
+These files describe a **generic Spring-style reference stack** (a
+`platform-service` monolith behind an `api-gateway`, with postgres, redis,
+Elasticsearch, S3, and SMTP dependencies). Service names, package namespaces
+(`com.example.*`), and log samples here are **illustrative**.
+
+The agent falls back to this corpus only when a host workspace supplies no
+`runbooks/` directory. **Replace it with your own runbooks** — retrieved chunks
+become evidence the LLM reasons over, so a foreign topology produces
+suggestions that name services you do not run. Keep host-specific naming in
+your workspace corpus and in `prompt_profile.yaml`, not here.
+
 ---
 
 ## Topics

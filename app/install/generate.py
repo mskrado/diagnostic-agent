@@ -759,7 +759,7 @@ def _host_loki_url_for_docs(params: InstallParams) -> str:
     if "://" in lowered:
         host = lowered.split("://", 1)[1].split("/", 1)[0].split(":", 1)[0]
         if host not in {"127.0.0.1", "localhost", "0.0.0.0"} and "." not in host:
-            # bare service name like loki / publishi-loki → published host port
+            # bare service name like loki / <prefix>-loki → published host port
             return "http://127.0.0.1:3100"
     return raw.rstrip("/")
 

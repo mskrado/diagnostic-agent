@@ -152,7 +152,7 @@ def test_format_diagnosis_email_renders_tools_and_fixes():
             },
             "suggested_next_steps": ["Check postgres container"],
             "tool_run_examples": [
-                "docker logs publishi-postgres --tail 100",
+                "docker logs acme-postgres --tail 100",
                 "curl -sf http://localhost:8080/actuator/health",
             ],
             "fix_suggestions": [
@@ -298,12 +298,12 @@ def test_deliver_email_sends_via_smtp():
     ):
         mock_settings.email_enabled = True
         mock_settings.email_to = "dev-alerts@localhost"
-        mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_subject_prefix = "acme"
         mock_settings.email_attach_audit = True
         mock_settings.email_attach_audit_max_bytes = 262144
         mock_settings.smtp_host = "mailpit"
         mock_settings.smtp_port = 1025
-        mock_settings.smtp_from = "diagnostic-agent@publishi.local"
+        mock_settings.smtp_from = "diagnostic-agent@acme.local"
         mock_settings.smtp_username = ""
         mock_settings.smtp_password = ""
         mock_settings.smtp_starttls = False
@@ -345,12 +345,12 @@ def test_deliver_email_skips_attachment_when_disabled():
     ):
         mock_settings.email_enabled = True
         mock_settings.email_to = "dev-alerts@localhost"
-        mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_subject_prefix = "acme"
         mock_settings.email_attach_audit = False
         mock_settings.email_attach_audit_max_bytes = 262144
         mock_settings.smtp_host = "mailpit"
         mock_settings.smtp_port = 1025
-        mock_settings.smtp_from = "diagnostic-agent@publishi.local"
+        mock_settings.smtp_from = "diagnostic-agent@acme.local"
         mock_settings.smtp_username = ""
         mock_settings.smtp_password = ""
         mock_settings.smtp_starttls = False
@@ -384,12 +384,12 @@ def test_deliver_email_skips_oversized_attachment():
     ):
         mock_settings.email_enabled = True
         mock_settings.email_to = "dev-alerts@localhost"
-        mock_settings.email_subject_prefix = "publishi"
+        mock_settings.email_subject_prefix = "acme"
         mock_settings.email_attach_audit = True
         mock_settings.email_attach_audit_max_bytes = 64
         mock_settings.smtp_host = "mailpit"
         mock_settings.smtp_port = 1025
-        mock_settings.smtp_from = "diagnostic-agent@publishi.local"
+        mock_settings.smtp_from = "diagnostic-agent@acme.local"
         mock_settings.smtp_username = ""
         mock_settings.smtp_password = ""
         mock_settings.smtp_starttls = False

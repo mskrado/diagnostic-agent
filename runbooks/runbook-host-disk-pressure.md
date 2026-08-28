@@ -34,9 +34,9 @@ Alertmanager/agent inability to write state.
 
 ## Example log lines (synthetic)
 ```json
-{"@timestamp":"2026-07-24T05:40:00.000Z","level":"ERROR","logger_name":"com.publishi.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef01234567890123456789012","message":"Free disk space below threshold: path=/var/lib/docker free=20K total=30G (0%); writes may fail"}
+{"@timestamp":"2026-07-24T05:40:00.000Z","level":"ERROR","logger_name":"com.example.platform.health.DiskSpaceHealthIndicator","service":"platform-service","trace_id":"6789abcdef01234567890123456789012","message":"Free disk space below threshold: path=/var/lib/docker free=20K total=30G (0%); writes may fail"}
 {"@timestamp":"2026-07-24T05:40:12.410Z","level":"ERROR","logger_name":"org.hibernate.engine.jdbc.spi.SqlExceptionHelper","service":"platform-service","trace_id":"789abcdef01234567890123456789013","message":"could not write to file: No space left on device"}
-{"@timestamp":"2026-07-24T05:41:00.100Z","level":"ERROR","logger_name":"com.publishi.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"89abcdef01234567890123456789014","message":"Failed to send template email to: user@example.com; nested exception is java.io.IOException: No space left on device"}
+{"@timestamp":"2026-07-24T05:41:00.100Z","level":"ERROR","logger_name":"com.example.notification.service.impl.EmailServiceImpl","service":"platform-service","trace_id":"89abcdef01234567890123456789014","message":"Failed to send template email to: user@example.com; nested exception is java.io.IOException: No space left on device"}
 ```
 
 ## Hypotheses-only

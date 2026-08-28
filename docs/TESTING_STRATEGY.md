@@ -6,6 +6,8 @@ test proves, what must be configured for it to run, and which ones are safe to
 point at production. For copy-paste operator recipes see
 [TESTING.md](TESTING.md).
 
+Examples use `acme` as a stand-in compose project prefix; substitute your own.
+
 The agent is unusual in two ways that shape the strategy:
 
 1. **It is config-driven.** Most production defects are workspace/profile
@@ -171,7 +173,7 @@ diag eval blind --live-url http://localhost:8001 --loki-url http://localhost:310
 The workspace flag belongs to `eval`, before the `blind` subcommand:
 
 ```bash
-python -m app.cli eval -w ./deploy/publishi.ai/agent/workspace blind --limit 3
+python -m app.cli eval -w ./deploy/acme/agent/workspace blind --limit 3
 ```
 
 Configure: `AGENT_CHAT_PROVIDER` / `AGENT_CHAT_MODEL` plus provider credentials
@@ -194,11 +196,11 @@ tenant identifiers in that audit line**, both emails in Mailpit, and the Grafana
 annotation when a token is configured.
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -DirectAgent
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -DirectAgent
 ```
 
 ```bash
-./scripts/smoke-test.sh -ContainerPrefix publishi
+./scripts/smoke-test.sh -ContainerPrefix acme
 ```
 
 Configure: `-ContainerPrefix` (or `AGENT_E2E_CONTAINER_PREFIX`) matching the host
@@ -217,12 +219,12 @@ because `-RulePath` talks to the **local** Docker daemon and HTTP tunnels cannot
 carry `docker run` / `docker exec`:
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RulePath
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RulePath
 
 .\scripts\prod-rulepath-e2e.ps1 `
   -SshTarget ec2-user@YOUR_HOST `
   -IdentityFile $HOME\.ssh\your-key.pem `
-  -ContainerPrefix publishi
+  -ContainerPrefix acme
 ```
 
 Configure: Promtail scraping container stdout, a Loki ruler group defining the
@@ -254,7 +256,7 @@ and produce an audit record. This is the only layer that validates the host's
 *production* alert rules rather than a synthetic marker.
 
 ```powershell
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -RealPath
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -RealPath
 ```
 
 **Never run against production.** It causes real downtime and real pages.
@@ -340,17 +342,17 @@ ones pass.
 ```powershell
 # 0. Read-only: is the deployment healthy and correctly wired?
 curl.exe http://127.0.0.1:8001/health
-ssh -i $HOME\.ssh\key.pem ec2-user@HOST "docker exec publishi-diagnostic-agent diag doctor"
+ssh -i $HOME\.ssh\key.pem ec2-user@HOST "docker exec acme-diagnostic-agent diag doctor"
 
 # 1. Read-only: does the deployed workspace still validate?
 ssh -i $HOME\.ssh\key.pem ec2-user@HOST `
-  "docker exec publishi-diagnostic-agent sh -c 'diag validate && diag lint'"
+  "docker exec acme-diagnostic-agent sh -c 'diag validate && diag lint'"
 
 # 2. Agent-only diagnosis path (one LLM call, no Alertmanager email)
-.\scripts\smoke-test.ps1 -ContainerPrefix publishi -AgentUrl http://localhost:8001 -DirectAgent
+.\scripts\smoke-test.ps1 -ContainerPrefix acme -AgentUrl http://localhost:8001 -DirectAgent
 
 # 3. Full reactive chain via the marker rule
-.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix publishi
+.\scripts\prod-rulepath-e2e.ps1 -SshTarget ec2-user@HOST -IdentityFile $HOME\.ssh\key.pem -ContainerPrefix acme
 
 # 4. Scenario coverage (scope it — every scenario is an LLM call)
 python scripts\runbook-e2e.py -w C:\path\to\host\workspace --mode live --scenario high-error-rate
