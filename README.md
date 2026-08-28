@@ -185,6 +185,27 @@ Delivery runs after the graph completes, on every route. Which channels fire
 depends on the route: PagerDuty opens an incident on `escalate`, Slack and email
 post the reasoning trace whenever they are enabled.
 
+### Deployment model: one agent per stack
+
+The agent is an **independent service** — it holds no knowledge of any
+application and reaches its data sources over plain HTTP. It is not, however, a
+multi-tenant service: **one running instance serves one stack.**
+
+That is deliberate. The profile, dependency map, redaction rules, RAG index, and
+LLM client are resolved once at startup from a single `AGENT_WORKSPACE` and
+cached for the process lifetime. Only the per-alert `service` label varies
+between requests.
+
+| | |
+|---|---|
+| **What you get** | Credentials, redaction rules, and the runbook index are scoped to one stack — a misconfigured workspace cannot leak another team's data or retrieve their runbooks |
+| **What it costs** | Several stacks means several instances, each with its own workspace, `.env`, and webhook URL |
+| **Serving many stacks from one process would need** | Per-alert profile routing, per-tenant RAG collections, per-stack credentials, and a tenant identity on the webhook — none of which exist today |
+
+Run one agent next to each observability stack, and give each its own workspace.
+See [docs/INSTALL.md](docs/INSTALL.md#run-the-agent-docker-image-or-standalone-process)
+for the runtime options.
+
 ### Routing (opt-in)
 
 Routing is off by default (`AGENT_ROUTING_ENABLED=false`), in which case
