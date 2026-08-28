@@ -80,7 +80,7 @@ jobs:
         run: |
           pip install pip-tools
           pip-compile requirements.txt -o requirements.lock.check --strip-extras --quiet
-          diff -u requirements.lock requirements.lock.check
+          python scripts/check-lock-drift.py requirements.lock requirements.lock.check
       # This repository is itself a workspace, so CI runs the host-facing
       # commands against it — the same code path a host project uses.
       - name: Corpus lint (no LLM)

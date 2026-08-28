@@ -1,5 +1,3 @@
-FROM python:3.12-slim
-
 # Reproducible builds: pin BASE_IMAGE by digest in client/agent compose build.args.
 # Internal mirrors: pass PIP_INDEX_URL / PIP_EXTRA_INDEX_URL at build time.
 ARG BASE_IMAGE=python:3.12-slim
