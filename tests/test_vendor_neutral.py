@@ -85,6 +85,31 @@ def test_no_host_branding_in_tracked_files():
     )
 
 
+def test_allowlist_has_no_stale_entries():
+    """An allowlisted path that no longer needs it must be removed.
+
+    A stale entry is a permanent, silent exemption: once the branding in that
+    file is cleaned up, the path keeps its waiver and branding can be
+    reintroduced there without the guard noticing.
+    """
+    stale: list[str] = []
+    for rel in sorted(ALLOWED_PATHS):
+        if rel == "tests/test_vendor_neutral.py":
+            continue  # this file necessarily contains the pattern it matches
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            stale.append(f"{rel} (no longer exists)")
+            continue
+        if not BRAND_PATTERN.search(path.read_text(encoding="utf-8")):
+            stale.append(f"{rel} (no branding left)")
+
+    assert not stale, (
+        "Remove these paths from ALLOWED_PATHS — they no longer contain host "
+        "branding, so the waiver only hides future regressions:\n  "
+        + "\n  ".join(stale)
+    )
+
+
 def test_guard_would_catch_reintroduced_branding():
     """The pattern matches branding but not the English word 'publishing'."""
     assert BRAND_PATTERN.search("container_name: publishi-platform-service")
