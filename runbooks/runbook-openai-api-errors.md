@@ -20,8 +20,8 @@ The `ai` module cannot call OpenAI. AI-assisted features fail; other modules una
 
 ## Example log lines (synthetic)
 ```json
-{"@timestamp":"2026-07-20T20:13:01.100Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"23456789abcdef0123456789012345678","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=21s"}
-{"@timestamp":"2026-07-20T20:13:04.900Z","level":"ERROR","logger_name":"com.publishi.platform.ai.OpenAiClient","service":"platform-service","trace_id":"3456789abcdef01234567890123456780","message":"OpenAI health check failed: 401 Unauthorized — Incorrect API key provided"}
+{"@timestamp":"2026-07-20T20:13:01.100Z","level":"ERROR","logger_name":"com.example.platform.ai.OpenAiClient","service":"platform-service","trace_id":"23456789abcdef0123456789012345678","message":"OpenAI API error: 429 Too Many Requests — Rate limit reached for requests; retry-after=21s"}
+{"@timestamp":"2026-07-20T20:13:04.900Z","level":"ERROR","logger_name":"com.example.platform.ai.OpenAiClient","service":"platform-service","trace_id":"3456789abcdef01234567890123456780","message":"OpenAI health check failed: 401 Unauthorized — Incorrect API key provided"}
 ```
 
 ## Hypotheses-only
