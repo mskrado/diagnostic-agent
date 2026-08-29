@@ -1,0 +1,27 @@
+# System packages required to build / run a host Python for diagnostic-agent.
+#
+# Amazon Linux 2 ships Python 3.7 and OpenSSL 1.0.2. Python >=3.11 (required by
+# this project) needs OpenSSL 1.1.1+ for the `_ssl` module. Install these before
+# `pyenv install 3.12` or any from-source Python build.
+#
+# Usage:
+#   sudo yum install -y $(grep -v '^#' deps/amazon-linux-2.txt | tr '\n' ' ')
+#
+# Or: ./scripts/install-system-deps.sh
+
+git
+curl
+gcc
+make
+patch
+bzip2-devel
+libffi-devel
+readline-devel
+sqlite-devel
+zlib-devel
+xz-devel
+# OpenSSL 1.1.1 (AL2 default openssl-devel is 1.0.2 and breaks Python 3.12 _ssl)
+openssl11
+openssl11-devel
+# Useful when the agent runs under Docker Compose on the same host
+docker
