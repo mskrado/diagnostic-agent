@@ -18,21 +18,46 @@ GitHub **Fork** inherits public visibility. For a private deployment, mirror-clo
 ```bash
 git clone --bare https://github.com/mskrado/diagnostic-agent.git
 cd diagnostic-agent.git
-git push --mirror https://github.com/<your-org>/diagnostic-agent.git
+# Replace YOUR_ORG with your GitHub org/user — do not leave angle brackets in the URL
+git push --mirror https://github.com/YOUR_ORG/diagnostic-agent.git
 cd ..
-git clone https://github.com/<your-org>/diagnostic-agent.git
+git clone https://github.com/YOUR_ORG/diagnostic-agent.git
 cd diagnostic-agent
 git remote add upstream https://github.com/mskrado/diagnostic-agent.git
 ```
 
 ## 2. Initialize your deployment
 
-From the repo root on the host where the agent will run:
+You need the `diag` CLI once to scaffold `client/`. Runtime afterward is Docker
+Compose (or systemd); you do **not** need a permanent system-wide `pip install`.
+
+### Host Python (recommended when the box has Python ≥3.11)
+
+Dependency layout and lock-file rules: **[DEPENDENCIES.md](DEPENDENCIES.md)**.
 
 ```bash
-pip install -e ".[dev]"
+./scripts/install-system-deps.sh   # yum/dnf/apt packages (AL2, AL2023, Ubuntu)
+# Amazon Linux 2 only: follow the script's pyenv + openssl11 instructions, then:
+./scripts/bootstrap-venv.sh        # creates .venv from requirements.lock
+source .venv/bin/activate
 diag init
 ```
+
+### No usable host Python (typical Amazon Linux 2)
+
+Run init in a one-shot container; files land on the host via the bind mount:
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
+```
+
+Do **not** paste angle-bracket placeholders into the shell. In the mirror-clone
+example above, replace `<your-org>` with your real GitHub org name (or bash
+treats `<` / `>` as redirection).
 
 This discovers Prometheus/Loki/Grafana/Alertmanager (and optional Ollama), writes:
 

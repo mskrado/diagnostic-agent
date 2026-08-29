@@ -15,6 +15,7 @@ UPSTREAM_OWNED_PATHS: frozenset[str] = frozenset(
         "tests",
         "docs",
         "scripts",
+        "deps",
         ".github",
         "Dockerfile",
         "pyproject.toml",
