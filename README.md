@@ -38,6 +38,7 @@ Additional documentation:
 | Document | Covers |
 |---|---|
 | [docs/CLIENT_FORK.md](docs/CLIENT_FORK.md) | **Client fork model**: private repo copy, `diag init`, start scripts, `diag upgrade`, offline packs |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Python + OS dependency layout, `requirements.lock`, host bootstrap scripts |
 | [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: parameters, generated files, **remote bundle deploy**, Docker image vs standalone `diag serve`, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
@@ -56,13 +57,17 @@ Additional documentation:
 Mirror-clone this repo into your organization, then on the deployment host:
 
 ```bash
-pip install -e ".[dev]"
+./scripts/install-system-deps.sh   # OS packages (skip if Python >=3.11 already works)
+./scripts/bootstrap-venv.sh        # .venv from requirements.lock + `diag`
+source .venv/bin/activate
 diag init
 cp client/agent/.env.example client/agent/.env   # fill secrets
 ./client/scripts/start.sh
 ```
 
-Full lifecycle (private copy, upgrades, air gap): **[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**
+Full lifecycle (private copy, upgrades, air gap, Docker-only init on Amazon Linux 2):
+**[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**. Dependency files and lock policy:
+**[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)**.
 
 ## Quick start — install bundle (throwaway)
 
