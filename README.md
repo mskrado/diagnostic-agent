@@ -1,20 +1,97 @@
 # diagnostic-agent
 
-A **config-driven**, reactive diagnostic agent for Prometheus / Alertmanager.
+**An alert fires. Before anyone wakes up, your metrics, your logs, and your
+runbooks have already been read — and a diagnosis is waiting.**
 
-When an alert fires, the agent pulls **metrics** (Prometheus), **logs** (Loki),
-and **dependency context**, retrieves relevant **runbooks** (RAG), reasons with
-a pluggable LLM, and emits a structured diagnostic report.
+[![CI](https://github.com/mskrado/diagnostic-agent/actions/workflows/ci.yml/badge.svg?branch=devel)](https://github.com/mskrado/diagnostic-agent/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-**Hypotheses only by default — no auto-remediation.** Opt-in
+At 03:00 an alert pages a human who then does something entirely mechanical:
+open the dashboard, tail the logs, remember which downstream service broke last
+time, and find the runbook someone wrote a year ago. `diagnostic-agent` does
+that first pass for you. It takes the Alertmanager webhook, pulls **metrics**
+from Prometheus, **logs** from Loki, and the **dependency context** of the
+affected service, retrieves the **runbooks** that match what it actually found
+(RAG), reasons over all of it with a pluggable LLM, and returns a structured
+diagnostic report — ranked hypotheses, each tied to the evidence behind it —
+into Slack, PagerDuty, email, or a Grafana annotation before anyone has opened a
+laptop.
+
+It is **hypotheses only by default — no auto-remediation.** The agent's job is
+to hand a human a head start, not to guess at your production. Opt-in
 [runbook execution](#runbook-execution-opt-in) exists behind `AGENT_EXEC_ENABLED`
 and runs only pre-approved, allowlisted actions in a locked-down sandbox. It is
 off unless a host deliberately turns it on.
+
+## Why this project exists
+
+Most "AI for on-call" tooling asks you to ship your telemetry somewhere and
+trust a black box. This one inverts that: the agent is a small service you run
+next to your own stack, and everything it knows about your system lives in
+**plain YAML and markdown that you own and review in git**.
+
+| | |
+|---|---|
+| **Config, not code** | A workspace directory — manifest, profile YAML, runbooks — teaches the agent your stack. Adapting it to a new platform is authoring files, not writing Python |
+| **Hypotheses, not actions** | Read-only by default. Every claim in the report has to cite metrics or logs the agent was actually given |
+| **Fail-closed everywhere** | [Redaction](#redaction-is-fail-closed) is mandatory (the agent refuses to start with zero rules), routing and execution default to off, and ambiguity escalates to a human instead of guessing |
+| **Your data stays yours** | Point it at a local Ollama model and nothing leaves the host; point it at any LangChain provider if you prefer |
+| **Knowledge that compounds** | The runbooks you write are the agent's reasoning material — and they keep working for humans too. See [the corpus is the product](#the-corpus-is-the-product-help-it-grow) |
 
 Deploying means holding a **client fork** of this repository: upstream product
 code plus your deployment under `client/`. Run `diag init` to scaffold compose,
 workspace, and start scripts; pull updates with `diag upgrade`. The single
 install and upgrade guide is **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+## See it work in two minutes
+
+No Prometheus, no Loki, no cluster — the repository ships a
+[hello-world workspace](examples/hello-world/) you can point the agent at and
+fire a synthetic alert into. Jump to
+[Try it locally](#try-it-locally-hello-world-workspace), or read
+[Architecture](#architecture) for the pipeline it runs.
+
+## The corpus is the product: help it grow
+
+The pipeline is the easy half. What decides whether a diagnosis is *useful* is
+the **runbook corpus** it retrieves from: the accumulated "when Postgres pool
+saturation looks like this, check that" knowledge that normally lives in senior
+engineers' heads and in Slack threads nobody can find again.
+
+That knowledge is the part that compounds. Every runbook added to the corpus is
+one more failure mode the agent can recognise, cite, and explain — for everyone
+who deploys it, not just its author. A contributed runbook about Kafka consumer
+lag makes the agent better at Kafka for every stack that ever pulls the image,
+and it remains a perfectly good human-readable runbook besides. The reference
+corpus already covers connection-pool exhaustion, Redis outages, JVM GC
+pressure, gateway 5xx, disk pressure, Elasticsearch degradation, SMTP, S3, and
+third-party API failures — the long tail of "what actually breaks" is where the
+contributions matter most.
+
+**This is the contribution we want most, and it needs no LLM credentials to
+review.** The loop is three files:
+
+1. A **runbook** under `runbooks/` (copy `runbooks/_TEMPLATE-runbook.md`) —
+   hypotheses and the queries an operator should paste into Grafana
+2. A **blind-eval case** in `eval/blind_eval_dataset.yaml` — synthetic logs plus
+   the ground-truth root cause, so the diagnosis can be scored offline
+3. A **scenario** in `runbook_scenarios.yaml` — the alert labels that should
+   surface it
+
+CI then lints all three on every PR without touching a model: schema,
+runbook↔scenario pairing, eval grounding, hypotheses-only wording. If you have
+ever written an incident postmortem, you already have the raw material — and
+`incident-YYYY-MM-DD-<slug>.md` write-ups are welcome corpus entries too.
+
+Good first contributions, in rough order of appetite: a runbook for a failure
+mode you have actually debugged · a preset for a stack that is not Spring
+(`generic-prometheus` and `spring-micrometer` ship today) · an example workspace
+· a `logs_profile.yaml` for a log format we do not parse well yet.
+
+Start at [CONTRIBUTING.md](CONTRIBUTING.md) and
+[runbooks/README.md](runbooks/README.md) for the authoring rules; the branch and
+review mechanics are in [docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md).
 
 ## Contents
 
@@ -148,7 +225,8 @@ Built-in presets (shipped in-package):
 - `spring-micrometer` — Spring Boot Micrometer (`http_server_requests_seconds_*`, HikariCP, JVM)
 
 Presets carry naming conventions, not topology: `service_map.yaml` comes from
-your profile only.
+your profile only. **Two presets is not enough** — a preset for your stack's
+metric naming is one of the highest-leverage contributions available.
 
 ### Redaction is fail-closed
 
@@ -350,7 +428,9 @@ cannot drift apart.
 This repository is itself a workspace — `runbooks/`, `runbook_scenarios.yaml`,
 and `eval/blind_eval_dataset.yaml` resolve through the same conventions a host
 uses — so CI exercises the host-facing commands rather than private test paths.
-See `eval/README.md` for the blind-eval workflow.
+That also means a corpus contribution is testable the moment you write it:
+`diag lint` is the same check CI runs, and it needs no model and no stack. See
+`eval/README.md` for the blind-eval workflow.
 
 ## License
 
@@ -358,7 +438,12 @@ Apache-2.0 — see [LICENSE](LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the shared lifecycle guide
+Contributions are genuinely welcome, and the highest-value one is the easiest to
+review: a **runbook + eval case + scenario** that CI can lint without LLM
+credentials. Every one of them permanently widens the set of failures the agent
+can explain — see [the corpus is the product](#the-corpus-is-the-product-help-it-grow).
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the shared lifecycle guide
 **[docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md)** (issue → `feature/<slug>-<n>` → `devel` →
-release). The preferred contribution is a **runbook + eval case + scenario** that
-CI can lint without LLM credentials.
+release). Bug reports, missing presets, and rough edges in the install path are
+all worth an issue.
