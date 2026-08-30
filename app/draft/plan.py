@@ -109,7 +109,11 @@ def draft(
         )
     )
     files.append(profiles.draft_logs_profile(evidence, oracle))
-    files.append(redaction.draft_redaction(evidence, preset=preset))
+    redaction_file = redaction.draft_redaction(evidence, preset=preset)
+    files.append(redaction_file)
+    review = redaction.draft_redaction_review(evidence)
+    if review is not None:
+        files.append(review)
 
     scenario_draft = alerts.draft_scenarios(
         evidence,

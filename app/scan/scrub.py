@@ -137,6 +137,21 @@ def _compiled() -> tuple[tuple[PatternSpec, re.Pattern[str]], ...]:
 
 
 @dataclass(frozen=True)
+class PatternExample:
+    """A safe before→after pair for a redaction proposal.
+
+    ``before_display`` never carries the raw secret: the matched span is replaced
+    with a «name» marker so the operator can see *what* matched without the value.
+    """
+
+    before_display: str
+    after: str
+
+    def to_dict(self) -> dict:
+        return {"before_display": self.before_display, "after": self.after}
+
+
+@dataclass(frozen=True)
 class SecretHit:
     """One pattern's tally over a sample, for the report and later proposals."""
 
@@ -144,6 +159,7 @@ class SecretHit:
     description: str
     lines: int
     matches: int
+    examples: tuple[PatternExample, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -151,6 +167,7 @@ class SecretHit:
             "description": self.description,
             "lines": self.lines,
             "matches": self.matches,
+            "examples": [e.to_dict() for e in self.examples],
         }
 
 
@@ -164,20 +181,25 @@ def scrub_text(text: str) -> str:
     return out
 
 
-def census(lines: list[str]) -> list[SecretHit]:
+def census(lines: list[str], *, max_examples: int = 3) -> list[SecretHit]:
     """Count pattern hits across raw lines, before scrubbing.
 
     Sorted by line count so the report leads with whatever is most pervasive.
+    Each hit carries up to ``max_examples`` safe before→after pairs.
     """
     hits: list[SecretHit] = []
     for spec, pattern in _compiled():
         line_count = 0
         match_count = 0
+        examples: list[PatternExample] = []
         for line in lines:
-            found = len(pattern.findall(line))
-            if found:
-                line_count += 1
-                match_count += found
+            found = list(pattern.finditer(line))
+            if not found:
+                continue
+            line_count += 1
+            match_count += len(found)
+            if len(examples) < max_examples:
+                examples.append(_example(spec, pattern, line))
         if line_count:
             hits.append(
                 SecretHit(
@@ -185,10 +207,31 @@ def census(lines: list[str]) -> list[SecretHit]:
                     description=spec.description,
                     lines=line_count,
                     matches=match_count,
+                    examples=tuple(examples),
                 )
             )
     hits.sort(key=lambda hit: (-hit.lines, hit.name))
     return hits
+
+
+def _example(
+    spec: PatternSpec, pattern: re.Pattern[str], line: str
+) -> PatternExample:
+    """Build a before→after pair that does not re-expose any secret value.
+
+    Every built-in pattern's match becomes a «name» marker in ``before_display``
+    (so neighbouring secrets on the same line cannot leak). ``after`` is the
+    line after the full scrubbing suite — what stacked redaction would emit.
+    """
+    before_display = line
+    for other, other_pattern in _compiled():
+        before_display = other_pattern.sub(f"«{other.name}»", before_display)
+    if len(before_display) > 240:
+        before_display = before_display[:240] + "…"
+    after = scrub_text(line)
+    if len(after) > 240:
+        after = after[:240] + "…"
+    return PatternExample(before_display=before_display, after=after)
 
 
 def workspace_scrubber():

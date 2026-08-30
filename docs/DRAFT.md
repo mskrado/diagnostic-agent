@@ -227,6 +227,35 @@ Ungrounded skeleton prose (invented `service=` filters, claimed execution) is
 discarded in favour of a safe template-only skeleton that still carries the
 DRAFT marker.
 
+## Redaction before→after review
+
+Every redaction candidate now ships with evidence, not just a count.
+`diag draft` writes `redaction-review.md` beside `redaction.yaml`:
+
+| before (match marked) | after (rule applied) |
+|---|---|
+| `user=«email» tenant_id=«tenant_kv» failed` | `user=[EMAIL-REDACTED] tenant_id=[REDACTED] failed` |
+
+Matched spans in the before column are replaced with a «pattern» marker so the
+review never re-exposes a raw secret. High false-positive patterns (UUID, long
+digit runs) stay commented out in `redaction.yaml` with their samples still
+visible in the review.
+
+## `diag mine-eval` — blind-eval cases from audits
+
+Deterministic mining of candidate blind-eval cases from the agent's redacted
+audit JSONL (no LLM):
+
+```bash
+diag mine-eval --audits ./audit -o ./blind_eval.draft.yaml
+```
+
+Each case takes alert labels, scrubbed log lines, metrics, and a draft
+`root_cause` from the diagnosis. `must_reference` tokens are chosen from the
+logs so lint grounding can pass once you adopt the case. The command refuses
+to overwrite an existing file without `--force`, and defaults to a `.draft.yaml`
+name so it cannot silently replace a curated `blind_eval.yaml`.
+
 ## What it does not do
 
 - **No LLM unless you ask.** Default `diag draft` stays deterministic.

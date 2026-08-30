@@ -465,12 +465,14 @@ def build_parser() -> argparse.ArgumentParser:
     from .fork.upgrade_cli import add_upgrade_parser
     from .draft.cli import add_draft_parser
     from .scan.cli import add_scan_parser
+    from .mine_eval_cli import add_mine_eval_parser
 
     add_install_parser(sub)
     add_init_parser(sub)
     add_upgrade_parser(sub)
     add_scan_parser(sub)
     add_draft_parser(sub)
+    add_mine_eval_parser(sub)
 
     return parser
 

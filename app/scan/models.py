@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .scrub import SecretHit
+from .scrub import PatternExample, SecretHit
 
 SCHEMA_VERSION = 1
 
@@ -239,6 +239,14 @@ class LokiEvidence:
                     description=str(s.get("description") or ""),
                     lines=int(s.get("lines") or 0),
                     matches=int(s.get("matches") or 0),
+                    examples=tuple(
+                        PatternExample(
+                            before_display=str(e.get("before_display") or ""),
+                            after=str(e.get("after") or ""),
+                        )
+                        for e in (s.get("examples") or [])
+                        if isinstance(e, dict)
+                    ),
                 )
                 for s in _dicts(data, "secrets")
             ),
