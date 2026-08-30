@@ -77,6 +77,24 @@ def add_draft_parser(sub: argparse._SubParsersAction) -> None:
         dest="as_json",
         help="Print the decision record as JSON instead of the report",
     )
+    draft.add_argument(
+        "--llm",
+        action="store_true",
+        help=(
+            "Opt in to LLM authoring: prompt_profile.yaml and DRAFT runbook "
+            "skeletons for uncovered alerts (requires a configured chat model)"
+        ),
+    )
+    draft.add_argument(
+        "--llm-prompt-only",
+        action="store_true",
+        help="With --llm, author only prompt_profile.yaml",
+    )
+    draft.add_argument(
+        "--llm-runbooks-only",
+        action="store_true",
+        help="With --llm, author only DRAFT runbook skeletons",
+    )
     draft.set_defaults(func=run_draft)
 
 
@@ -94,6 +112,13 @@ def run_draft(args: argparse.Namespace) -> int:
     config_mod.settings = config_mod.Settings()
     settings = config_mod.settings
 
+    use_llm = bool(args.llm or args.llm_prompt_only or args.llm_runbooks_only)
+    llm_prompt = use_llm and not args.llm_runbooks_only
+    llm_runbooks = use_llm and not args.llm_prompt_only
+    if args.llm_prompt_only and args.llm_runbooks_only:
+        llm_prompt = True
+        llm_runbooks = True
+
     options = DraftOptions(
         prometheus_url=args.prometheus_url or settings.prometheus_url,
         loki_url=args.loki_url or settings.loki_url,
@@ -105,6 +130,9 @@ def run_draft(args: argparse.Namespace) -> int:
         window=args.window,
         workspace=str(ws.root),
         agent_version=_package_version(),
+        use_llm=use_llm,
+        llm_prompt=llm_prompt,
+        llm_runbooks=llm_runbooks,
     )
 
     if args.bundle:

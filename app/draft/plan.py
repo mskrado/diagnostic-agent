@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from ..scan.collect import ScanOptions, collect_evidence
 from ..scan.models import ScanEvidence
@@ -11,6 +12,8 @@ from .models import DraftedFile, DraftResult
 from .verify import LiveOracle, Oracle
 
 logger = logging.getLogger(__name__)
+
+InvokeFn = Callable[[list], Any]
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,13 @@ class DraftOptions:
     window: str = "5m"
     workspace: str = ""
     agent_version: str = ""
+    # Phase 3 — opt-in LLM authoring. Default stays fully deterministic.
+    use_llm: bool = False
+    llm_prompt: bool = True
+    llm_runbooks: bool = True
+    # Injected by tests; production resolves the chat model lazily.
+    prompt_invoke: InvokeFn | None = None
+    runbook_invoke: InvokeFn | None = None
 
 
 def scan_for_draft(options: DraftOptions) -> ScanEvidence:
@@ -106,16 +116,74 @@ def draft(
         node_names=tuple(node.name for node in nodes),
         fallback_service=target.service if target else "",
     )
-    if scenario_draft.scenarios is not None:
-        files.append(scenario_draft.scenarios)
-        files.extend(scenario_draft.runbooks)
+    scenarios_file = scenario_draft.scenarios
+    runbook_files = list(scenario_draft.runbooks)
+    uncovered = scenario_draft.uncovered
+    draft_runbook_alerts: tuple[str, ...] = ()
+
+    if options.use_llm and options.llm_runbooks and uncovered:
+        from . import runbook_llm
+
+        skeletons = runbook_llm.draft_skeletons(
+            evidence,
+            uncovered,
+            node_names=tuple(node.name for node in nodes),
+            fallback_service=target.service if target else "",
+            extra_urls=(
+                options.prometheus_url,
+                options.loki_url,
+                options.alertmanager_url,
+            ),
+            invoke=options.runbook_invoke,
+        )
+        runbook_files.extend(skeletons.runbooks)
+        scenarios_file = runbook_llm.merge_scenarios_file(
+            scenarios_file,
+            skeletons.scenarios,
+            evidence_note=(
+                f"{len(scenario_draft.copied)} reference runbook(s) + "
+                f"{len(skeletons.drafted_alerts)} DRAFT skeleton(s)"
+            ),
+        )
+        draft_runbook_alerts = skeletons.drafted_alerts
+        uncovered = tuple(
+            name for name in uncovered if name not in skeletons.drafted_alerts
+        )
+        if skeletons.candidates and scenarios_file is not None:
+            scenarios_file = DraftedFile(
+                path=scenarios_file.path,
+                content=scenarios_file.content,
+                candidates=scenarios_file.candidates + skeletons.candidates,
+            )
+
+    if scenarios_file is not None:
+        files.append(scenarios_file)
+        files.extend(runbook_files)
     elif evidence.all_rules():
         warnings.append(
             f"none of the {len(evidence.all_rules())} alert(s) matched a reference "
             "runbook, so no scenarios were drafted"
+            + (" (pass --llm to skeleton the rest)" if not options.use_llm else "")
         )
     else:
         warnings.append("no alerting rules found, so no scenarios were drafted")
+
+    if options.use_llm and options.llm_prompt:
+        from . import prompt_llm
+
+        files.append(
+            prompt_llm.author_prompt_profile(
+                evidence,
+                nodes,
+                preset=preset,
+                extra_urls=(
+                    options.prometheus_url,
+                    options.loki_url,
+                    options.alertmanager_url,
+                ),
+                invoke=options.prompt_invoke,
+            )
+        )
 
     files.append(
         _agent_manifest(
@@ -126,13 +194,21 @@ def draft(
         )
     )
 
+    if draft_runbook_alerts:
+        warnings.append(
+            f"{len(draft_runbook_alerts)} DRAFT runbook(s) need a human edit before "
+            "diag lint will pass: " + ", ".join(draft_runbook_alerts[:8])
+            + (" ..." if len(draft_runbook_alerts) > 8 else "")
+        )
+
     return DraftResult(
         files=tuple(files),
         copied=scenario_draft.copied,
         preset=preset,
         preset_scores=scores,
-        uncovered_alerts=scenario_draft.uncovered,
+        uncovered_alerts=uncovered,
         unused_runbooks=scenario_draft.unused,
+        draft_runbooks=draft_runbook_alerts,
         warnings=tuple(warnings),
     )
 
@@ -162,6 +238,11 @@ def _agent_manifest(
         evidence=[
             f"preset {preset} selected by query score",
             f"drafted by agent {options.agent_version or 'unknown'}",
+            (
+                "LLM authoring enabled (--llm)"
+                if options.use_llm
+                else "deterministic draft (no LLM)"
+            ),
         ],
         configure=(
             "Point `profile:` at a subdirectory if you prefer the profile split "
@@ -192,16 +273,22 @@ def report(result: DraftResult, evidence: ScanEvidence) -> str:
 
     lines.extend(["", "files", rule])
     runbook_count = 0
+    draft_count = 0
     for drafted in result.files:
         if drafted.path.startswith("runbooks/"):
             runbook_count += 1
+            if "DRAFT:" in drafted.content:
+                draft_count += 1
             continue
         accepted = len(drafted.accepted)
         withheld = len(drafted.withheld)
         suffix = f", {withheld} withheld" if withheld else ""
         lines.append(f"  {drafted.path:<28} {accepted} verified value(s){suffix}")
     if runbook_count:
-        lines.append(f"  {'runbooks/':<28} {runbook_count} runbook(s) carried over")
+        detail = f"{runbook_count} runbook(s)"
+        if draft_count:
+            detail += f" ({draft_count} marked DRAFT)"
+        lines.append(f"  {'runbooks/':<28} {detail}")
 
     withheld_all = [c for c in result.all_candidates() if not c.accepted]
     if withheld_all:
@@ -214,6 +301,15 @@ def report(result: DraftResult, evidence: ScanEvidence) -> str:
         for copy in result.copied:
             lines.append(f"  {copy.path}: {copy.reason}")
 
+    if result.draft_runbooks:
+        lines.extend(["", "DRAFT runbooks (lint will reject until edited)", rule])
+        for name in result.draft_runbooks:
+            lines.append(f"  {name}")
+        lines.append("")
+        lines.append(
+            "Edit each skeleton, remove the DRAFT marker, then re-run diag lint."
+        )
+
     if result.uncovered_alerts:
         lines.extend(["", "alerts with no runbook", rule])
         for name in result.uncovered_alerts:
@@ -222,6 +318,11 @@ def report(result: DraftResult, evidence: ScanEvidence) -> str:
         lines.append(
             "Write a runbook for these, then add the scenario. This is the "
             "corpus backlog, measured."
+            + (
+                " Pass --llm to skeleton them as DRAFTs."
+                if not result.draft_runbooks
+                else ""
+            )
         )
 
     if result.unused_runbooks:
