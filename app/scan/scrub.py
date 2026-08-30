@@ -17,81 +17,123 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
-# Ordered: earlier patterns win on overlapping text. Each entry is
-# (name, compiled pattern, replacement, what it is for).
-_PATTERNS: tuple[tuple[str, re.Pattern[str], str, str], ...] = (
-    (
+_FLAGS = {
+    "IGNORECASE": re.IGNORECASE,
+    "DOTALL": re.DOTALL,
+    "MULTILINE": re.MULTILINE,
+}
+
+
+@dataclass(frozen=True)
+class PatternSpec:
+    """A sensitive-data pattern, in the shape ``redaction.yaml`` uses.
+
+    Sharing one definition means a rule proposed for a workspace is literally the
+    rule the scan applied to the sample it was proposed from.
+    """
+
+    name: str
+    pattern: str
+    replacement: str
+    description: str
+    flags: str = ""
+    # Whether to propose this as an *active* rule. Patterns with a real
+    # false-positive cost on report prose are proposed commented out instead.
+    propose_active: bool = True
+
+    def compiled(self) -> re.Pattern[str]:
+        value = 0
+        for token in (self.flags or "").split(","):
+            value |= _FLAGS.get(token.strip().upper(), 0)
+        return re.compile(self.pattern, value)
+
+
+# Ordered: earlier patterns win on overlapping text.
+_SPECS: tuple[PatternSpec, ...] = (
+    PatternSpec(
         "private_key",
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
         "[PRIVATE-KEY-REDACTED]",
         "PEM private key block",
+        flags="DOTALL",
     ),
-    (
+    PatternSpec(
         "jwt",
-        re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"),
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+",
         "[JWT-REDACTED]",
         "JSON web token",
     ),
-    (
+    PatternSpec(
         "bearer_token",
-        re.compile(r"(bearer\s+)[A-Za-z0-9._\-]+", re.IGNORECASE),
+        r"(bearer\s+)[A-Za-z0-9._\-]+",
         r"\1[REDACTED]",
         "Authorization bearer token",
+        flags="IGNORECASE",
     ),
-    (
+    PatternSpec(
         "aws_access_key",
-        re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+        r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
         "[AWS-KEY-REDACTED]",
         "AWS access key id",
     ),
-    (
+    PatternSpec(
         "secret_kv",
-        re.compile(
-            r"(\"?(?:password|passwd|secret|token|api[_-]?key|authorization|"
-            r"credential)\"?\s*[:=]\s*\"?)([^\"\s,;}]+)",
-            re.IGNORECASE,
-        ),
+        r"(\"?(?:password|passwd|secret|token|api[_-]?key|authorization|"
+        r"credential)\"?\s*[:=]\s*\"?)([^\"\s,;}]+)",
         r"\1[REDACTED]",
         "secret-looking key/value pair",
+        flags="IGNORECASE",
     ),
-    (
+    PatternSpec(
         "email",
-        re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"),
+        r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
         "[EMAIL-REDACTED]",
         "email address",
     ),
-    (
+    PatternSpec(
         "tenant_kv",
-        re.compile(
-            r"(\"?tenant[_-]?id\"?\s*[:=]\s*\"?)([^\"\s,;}]+)",
-            re.IGNORECASE,
-        ),
+        r"(\"?tenant[_-]?id\"?\s*[:=]\s*\"?)([^\"\s,;}]+)",
         r"\1[REDACTED]",
         "tenant identifier",
+        flags="IGNORECASE",
     ),
-    (
+    PatternSpec(
         "uuid",
-        re.compile(
-            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
-            re.IGNORECASE,
-        ),
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
         "[UUID-REDACTED]",
         "UUID (often a tenant, user, or request id)",
+        flags="IGNORECASE",
+        # Trace and request ids are UUIDs too, and they are how an operator
+        # follows an incident across services.
+        propose_active=False,
     ),
-    (
+    PatternSpec(
         "url_userinfo",
-        re.compile(r"(?<=://)([^/\s:@]+):([^/\s@]+)@"),
+        r"(?<=://)([^/\s:@]+):([^/\s@]+)@",
         "[REDACTED]@",
         "credentials embedded in a URL",
     ),
-    (
+    PatternSpec(
         "credit_card",
-        re.compile(r"\b(?:\d[ -]?){13,16}\b"),
+        r"\b(?:\d[ -]?){13,16}\b",
         "[CARD-REDACTED]",
         "card-length digit run",
+        # Matches any long digit run: byte counts, ids, epoch millis.
+        propose_active=False,
     ),
 )
+
+
+def pattern_specs() -> tuple[PatternSpec, ...]:
+    """The built-in patterns, for callers proposing ``redaction.yaml`` rules."""
+    return _SPECS
+
+
+@lru_cache(maxsize=1)
+def _compiled() -> tuple[tuple[PatternSpec, re.Pattern[str]], ...]:
+    return tuple((spec, spec.compiled()) for spec in _SPECS)
 
 
 @dataclass(frozen=True)
@@ -117,8 +159,8 @@ def scrub_text(text: str) -> str:
     if not text:
         return text
     out = text
-    for _name, pattern, replacement, _desc in _PATTERNS:
-        out = pattern.sub(replacement, out)
+    for spec, pattern in _compiled():
+        out = pattern.sub(spec.replacement, out)
     return out
 
 
@@ -128,7 +170,7 @@ def census(lines: list[str]) -> list[SecretHit]:
     Sorted by line count so the report leads with whatever is most pervasive.
     """
     hits: list[SecretHit] = []
-    for name, pattern, _replacement, description in _PATTERNS:
+    for spec, pattern in _compiled():
         line_count = 0
         match_count = 0
         for line in lines:
@@ -139,8 +181,8 @@ def census(lines: list[str]) -> list[SecretHit]:
         if line_count:
             hits.append(
                 SecretHit(
-                    name=name,
-                    description=description,
+                    name=spec.name,
+                    description=spec.description,
                     lines=line_count,
                     matches=match_count,
                 )

@@ -145,21 +145,21 @@ A scan reads production logs, so it treats them carefully:
 
 `--out` writes a schema-versioned JSON document with four sections —
 `prometheus`, `loki`, `alertmanager`, and `findings` (the cross-referenced
-conclusions the report renders). The shape is a deliberate contract: a later
-phase of [#119](https://github.com/mskrado/diagnostic-agent/issues/119) consumes
-a bundle to draft workspace files, and it must be able to read one produced by
-an older scan.
+conclusions the report renders). The shape is a deliberate contract:
+[`diag draft`](DRAFT.md) consumes a bundle to draft workspace files, and it must
+be able to read one produced by an older scan. A bundle whose schema is newer
+than the agent understands is refused rather than half-read.
 
 ## What it does not do
 
 It does not write or modify workspace files, does not call an LLM, and does not
 decide anything on your behalf. Turning evidence into drafted
 `service_map.yaml` / `logs_profile.yaml` / `metrics_profile.yaml` files is the
-job of `diag draft`, tracked in
-[#119](https://github.com/mskrado/diagnostic-agent/issues/119).
+job of [`diag draft`](DRAFT.md).
 
 ## Related
 
+- [DRAFT.md](DRAFT.md) — turning this evidence into workspace files
 - [WORKSPACE.md](WORKSPACE.md) — what each workspace file is for
 - [INSTALL.md](INSTALL.md) — `diag install` / `diag init` scaffolding
 - [PROMPT_PROFILE_AUTHORING.md](PROMPT_PROFILE_AUTHORING.md) — writing the prompt profile
