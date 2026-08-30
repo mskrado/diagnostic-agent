@@ -149,7 +149,7 @@ def run_init(args: argparse.Namespace) -> int:
         print(f"  5. Wire    merge {output_path / 'observability'} into your live stack")
         print(f"  6. Commit  {output_path}/ to your private repo (never commit .env)")
         print(f"\nFull instructions: {output_path / 'APPLY.md'}")
-        print("Upgrades and offline packs: docs/CLIENT_FORK.md")
+        print("Upgrades and offline packs: docs/INSTALL.md")
         if report.warnings:
             print("\nWarnings to resolve before the agent can diagnose:")
             for w in report.warnings:

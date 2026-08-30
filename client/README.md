@@ -25,7 +25,7 @@ That discovers your observability stack and writes:
 - **Upstream owns:** `app/`, `runbooks/`, `examples/`, `eval/`, `tests/`, `docs/`, `scripts/`, `Dockerfile`, `requirements*.txt`, `pyproject.toml`, `.github/`
 - **You own:** everything under `client/**`
 
-Never edit upstream-owned paths in your fork. Custom runbooks belong in `client/workspace/runbooks/`. Pull upstream updates with `diag upgrade` (see [docs/CLIENT_FORK.md](../docs/CLIENT_FORK.md)).
+Never edit upstream-owned paths in your fork. Custom runbooks belong in `client/workspace/runbooks/`. Pull upstream updates with `diag upgrade` (see [docs/INSTALL.md](../docs/INSTALL.md)).
 
 ## Secrets
 

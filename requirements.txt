@@ -4,7 +4,7 @@
 #
 # Test/dev dependencies live in requirements-dev.txt.
 # Exact pins: requirements.lock (regenerate with pip-compile).
-# Host bootstrap: ./scripts/bootstrap-venv.sh — see docs/DEPENDENCIES.md.
+# Host bootstrap: ./scripts/bootstrap-venv.sh — see docs/INSTALL.md.
 
 # --- Core agent stack ---
 langgraph>=0.2
