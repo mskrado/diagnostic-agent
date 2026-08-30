@@ -288,5 +288,5 @@ PowerShell: `.\\client\\scripts\\start.ps1`
 
 ## Updates
 
-See [docs/CLIENT_FORK.md](../../docs/CLIENT_FORK.md) for `diag upgrade` and offline packs.
+See [docs/INSTALL.md](../../docs/INSTALL.md) for `diag upgrade` and offline packs.
 """

@@ -4,7 +4,7 @@
 # Uses requirements.lock (exact pins) for runtime deps, then editable install
 # for the `diag` console script. Optional --dev also installs requirements-dev.txt.
 #
-# Prerequisites: Python >=3.11 on PATH (see .python-version / docs/CLIENT_FORK.md).
+# Prerequisites: Python >=3.11 on PATH (see .python-version / docs/INSTALL.md).
 # On Amazon Linux 2, install OS packages first: ./scripts/install-system-deps.sh
 set -euo pipefail
 
@@ -62,7 +62,7 @@ This project requires Python >=3.11 (see pyproject.toml / .python-version).
 
   Amazon Linux 2:  ./scripts/install-system-deps.sh   # then pyenv install 3.12
   Amazon Linux 2023 / Ubuntu: ./scripts/install-system-deps.sh
-  Or run init without a host Python via Docker — see docs/CLIENT_FORK.md
+  Or run init without a host Python via Docker — see docs/INSTALL.md
 EOF
   exit 1
 fi
