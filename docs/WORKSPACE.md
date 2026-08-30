@@ -1,8 +1,38 @@
 # Host workspace reference
 
-A **workspace** is one directory in your repository holding everything specific
-to your stack. The agent ships as a generic image; the workspace is the only
-thing you write.
+The agent ships as a generic Docker image that knows **nothing** about your
+systems: not your service names, not your metric names, not where your logs
+live. A **workspace** is the one directory where you tell it those things. It is
+the only thing you have to write, and it is plain YAML and markdown that lives
+in your own git repository.
+
+## Think of it as onboarding a new engineer
+
+Imagine a capable engineer joining your team on Monday. Before they can take a
+turn on-call, they need a few things from you — and the workspace is exactly
+that handover packet, written down in files instead of explained over coffee:
+
+| What a new engineer needs to be told | Where the agent reads it |
+|---|---|
+| "Here is how our services fit together, and what breaks when one of them does" | [`service_map.yaml`](#service_mapyaml) |
+| "This is how you check whether a service is healthy" | [`metrics_profile.yaml`](#metrics_profileyaml) |
+| "The logs are here, and these are the lines worth reading" | [`logs_profile.yaml`](#logs_profileyaml) |
+| "Here's what we learned the last five times this broke" | [`runbooks/`](#runbooks) |
+| "Never put customer data or tokens in a ticket" | [`redaction.yaml`](#redactionyaml) |
+| "This is our platform, described in our own words" | [`prompt_profile.yaml`](#prompt_profileyaml) |
+| "These are the few actions you're allowed to take yourself" | [`execution_profile.yaml`](#execution_profileyaml-optional) |
+
+The remaining two files are for *testing* the agent rather than running it:
+[`scenarios.yaml`](#scenariosyaml) lists example alerts to replay, and
+[`blind_eval.yaml`](#blind_evalyaml-optional) holds synthetic incidents with
+known answers so you can score the agent's diagnoses offline.
+
+Nothing here is code, and nothing here is secret — credentials and URLs live in
+the agent's `.env`, not in the workspace.
+
+## The shape of a workspace
+
+One directory, anywhere in your repository:
 
 ```
 infrastructure/diagnostic-agent/
@@ -18,26 +48,33 @@ infrastructure/diagnostic-agent/
 └── runbooks/             # markdown playbooks for RAG
 ```
 
-`diag install` writes the same layout under `deploy/agent/workspace/` as editable
-stubs. Full install-bundle files (`.env`, compose, observability snippets) are
-documented in [INSTALL.md](INSTALL.md#what-gets-generated).
-
-Because the manifest declares every path, commands take no path arguments:
+You then hand that one directory to the agent, and every command finds
+everything inside it — no path arguments:
 
 ```bash
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:<tag> diag validate
 ```
 
+`diag install` writes the same layout under `deploy/agent/workspace/` as editable
+stubs. Full install-bundle files (`.env`, compose, observability snippets) are
+documented in [INSTALL.md](INSTALL.md#what-gets-generated).
+
+The fastest way to make this concrete is to read a real one:
+[`examples/hello-world/`](../examples/hello-world/) is a complete workspace for a
+plain three-tier app, and each file is only a few lines long.
+
 ---
 
 ## Topics
 
-1. [Locating the workspace](#locating-the-workspace)
-2. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
-3. [Manifest (`agent.yaml`)](#manifest-agentyaml)
-4. [Flat layout](#flat-layout)
-5. [File-by-file reference](#file-by-file-reference)
+1. [What each file is for](#what-each-file-is-for)
+2. [The smallest workspace that works](#the-smallest-workspace-that-works)
+3. [Locating the workspace](#locating-the-workspace)
+4. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
+5. [Manifest (`agent.yaml`)](#manifest-agentyaml)
+6. [Flat layout](#flat-layout)
+7. [File-by-file reference](#file-by-file-reference)
    - [`metrics_profile.yaml`](#metrics_profileyaml)
    - [`logs_profile.yaml`](#logs_profileyaml)
    - [`prompt_profile.yaml`](#prompt_profileyaml)
@@ -47,11 +84,62 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
    - [`scenarios.yaml`](#scenariosyaml)
    - [`blind_eval.yaml`](#blind_evalyaml-optional)
    - [`runbooks/`](#runbooks)
-6. [Precedence](#precedence)
-7. [Redaction is fail-closed](#redaction-is-fail-closed)
-8. [Validating in CI](#validating-in-ci)
+8. [When the workspace is wrong](#when-the-workspace-is-wrong)
+9. [Precedence](#precedence)
+10. [Redaction is fail-closed](#redaction-is-fail-closed)
+11. [Validating in CI](#validating-in-ci)
 
 ---
+
+## What each file is for
+
+Skim this table to get oriented; the
+[file-by-file reference](#file-by-file-reference) has the full field lists.
+
+| File | The question it answers | Needed? | If you leave it out |
+|---|---|---|---|
+| `agent.yaml` | "Which metric naming does this stack use, and where is everything?" | Recommended | Conventional layout is auto-detected and the `generic-prometheus` preset is assumed |
+| `service_map.yaml` | "What talks to what?" | **Strongly recommended** | The agent diagnoses the alerting service in isolation — no blast radius, no dependency metrics |
+| `metrics_profile.yaml` | "What PromQL measures error rate, latency, saturation here?" | Usually one line | Preset queries are used, which is fine if your metric names match the preset |
+| `logs_profile.yaml` | "Which Loki label is the service, and which lines matter for this alert?" | Usually short | Defaults to `service` label and `ERROR\|WARN` lines |
+| `prompt_profile.yaml` | "What is this platform, in your words?" | Recommended | The model reasons without your vocabulary, hostnames, or ports |
+| `redaction.yaml` | "What must never leave the box?" | **Effectively required** | Preset secret scrubbing still applies, but zero resolved rules means the agent refuses to start ([fail-closed](#redaction-is-fail-closed)) |
+| `runbooks/` | "What have we learned about these failures?" | **Strongly recommended** | Diagnoses rest on metrics and logs alone, with no institutional knowledge |
+| `execution_profile.yaml` | "Which actions may the agent ever run itself?" | Optional | The agent can never execute anything — it can only report and escalate |
+| `scenarios.yaml` | "Which alerts should we test against?" | Optional | `diag lint`, `diag e2e`, and `diag replay` skip the checks that need it |
+| `blind_eval.yaml` | "Can we score its diagnoses offline?" | Optional | `diag eval blind` needs an explicit `--dataset` instead |
+
+Two useful rules of thumb:
+
+- **A file you omit is simply absent**, and tools skip the checks that need it.
+  A path you *declare* in `agent.yaml` must exist — that is an error, not a
+  fallback. This is what makes incremental adoption safe.
+- **A file you provide does not have to be complete.** Every profile file starts
+  from a built-in preset via `extends:`, so you only write the parts where your
+  stack differs.
+
+## The smallest workspace that works
+
+You do not have to write all ten files. A useful workspace can be three:
+
+```
+diagnostic-agent/
+├── agent.yaml          # schema: 1  +  extends: generic-prometheus
+├── service_map.yaml    # your services and who calls whom
+└── runbooks/           # one markdown file per failure you have seen
+```
+
+That gets you real blast-radius reasoning and your own institutional knowledge,
+while metrics, logs, redaction, and prompt framing fall back to the preset. Then
+grow it as you hit the limits:
+
+| You notice | Add |
+|---|---|
+| Queries return nothing — your metric names differ from the preset | `metrics_profile.yaml` overrides |
+| The log sample is empty or full of noise | `logs_profile.yaml` (`service_label`, `alert_line_filters`) |
+| Reports contain tenant ids, emails, or internal hostnames | `redaction.yaml` rules |
+| Suggested checks name services or ports you do not have | `prompt_profile.yaml` |
+| You want the checks to run in CI | `scenarios.yaml`, then `blind_eval.yaml` |
 
 ## Locating the workspace
 
@@ -85,6 +173,85 @@ During a diagnosis (webhook or `POST /alert`):
 | Retrieved playbooks | `runbooks/` via RAG (if enabled) |
 | Scrubbing before delivery | `redaction.yaml` |
 
+### Worked example: one alert, file by file
+
+Take the bundled [`examples/hello-world/`](../examples/hello-world/) workspace —
+`api` (edge proxy) → `app` (the application) → `postgres` and `redis` — and
+suppose Alertmanager posts this:
+
+```json
+{"alerts": [{"status": "firing", "labels": {
+  "alertname": "HighErrorRate", "service": "app", "severity": "warning"}}]}
+```
+
+Here is what each file contributes, in the order the agent touches them.
+
+**1. `service_map.yaml` — who else is involved?** The alert names `app`, and the
+map says `app` is a `monolith` whose upstream is `api` and whose downstream is
+`postgres` and `redis`. So the agent now has three things: the alerting service,
+its **neighbours** (`api`, `postgres`, `redis`) to gather evidence about, and its
+**blast radius** (`postgres`, `redis` — what may also be degraded).
+
+**2. `metrics_profile.yaml` — what do I measure, and how?** Each service in the
+map has a `kind`, and the metrics profile says which kinds get the standard
+service suite. `app` (`monolith`) and `api` (`http`) qualify, so the agent
+renders each template with that service name and a `5m` window. The preset's
+`error_rate` template becomes real PromQL:
+
+```promql
+sum(rate(http_requests_total{service="app",code=~"5.."}[5m]))
+  / clamp_min(sum(rate(http_requests_total{service="app"}[5m])), 0.001)
+```
+
+…and the same for `request_rate`, `latency_p99`, and `service_up`. `postgres`
+and `redis` are *not* in the preset's `service_kinds` and `generic-prometheus`
+ships no `dependency_probes`, so they contribute no metrics here — which is
+exactly the gap `dependency_probes` exists to fill (the `spring-micrometer`
+preset, for instance, probes HikariCP pending connections for `kind: database`).
+
+**3. `logs_profile.yaml` — which log lines?** `service_label: service` makes the
+Loki stream selector `{service="app"}`. There is no `alert_line_filters` entry
+for `HighErrorRate`, so the agent falls back to the level gate:
+
+```logql
+{service="app"} | json | level=~"ERROR|WARN"
+```
+
+Had the alert been `PostgresErrorsInLogs`, the file's filter for that alertname
+would have been used instead, replacing the level gate with a targeted regex so
+that INFO lines matching the same pattern the Loki ruler fired on are still
+included:
+
+```logql
+{service="app"} |~ "(?i)(postgres|jdbc|connection).*(refused|timeout)"
+```
+
+Note the selector is still `{service="app"}`: a `PostgresErrorsInLogs` alert
+carries `service=postgres`, but the map's `log_services: [app]` on the
+`postgres` node redirects the query, because Postgres itself does not ship logs
+to Loki — its errors surface in the application's log stream. That redirect is a
+detail only you can know, and it is why `service_map.yaml` matters so much.
+
+**4. `runbooks/` — what do we already know?** The alert name, service, and the
+error families found in those log lines become retrieval queries, which pull the
+most similar chunks out of the corpus — here, `runbook-high-error-rate.md`. Those
+excerpts go into the prompt as evidence the model may cite.
+
+**5. `prompt_profile.yaml` — whose stack is this?** The model is told, in your
+words, that this is "a simple 3-tier web application (api → app →
+postgres/redis) observed via Prometheus and Loki", plus your copy-pasteable
+`curl` examples against Prometheus on `:9090` and Loki on `:3100`. This is what
+keeps suggested next steps phrased in commands that actually work here.
+
+**6. `redaction.yaml` — what must not leave?** The finished report goes out to
+Slack, email, PagerDuty, a Grafana annotation, and the audit log. Every one of
+those passes through the resolved rules first. hello-world adds none of its own,
+so it inherits the preset's bearer-token and AWS-key scrubbing.
+
+The result: a structured report naming the likely cause, the evidence behind it,
+and `postgres`/`redis` as the blast radius — assembled entirely from six small
+files you can read in a couple of minutes.
+
 Wrong preset or an empty/stub `service_map.yaml` does not crash the agent, but
 live scoring against a real stack (metrics names, topology, hints) will be weak.
 
@@ -103,9 +270,9 @@ effect. See [README → Deployment model](../README.md#deployment-model-one-agen
 
 ## Manifest (`agent.yaml`)
 
-`agent.yaml` is optional. A directory following the conventional layout resolves
-identically; the manifest exists to pin a version, choose a preset, and override
-paths.
+`agent.yaml` is the table of contents. It is **optional** — a directory
+following the conventional layout resolves identically — and exists so you can
+pin a version, choose a preset, and point at non-default paths.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -134,13 +301,18 @@ the checks that need it. This lets you adopt the corpus incrementally.
 
 ### Presets (`extends`)
 
-Presets ship **inside the image** under `app/profile/presets/`. Workspace files
-normally only declare `extends: <preset>` and add host-specific overlays.
+A preset is a set of naming conventions shipped **inside the image**, under
+`app/profile/presets/`. Picking the right one is the highest-leverage line in
+the whole workspace: it decides whether the agent's queries return numbers or
+nothing. Your files then only need to state where your stack differs.
 
 | Preset | Use when apps expose |
 |---|---|
 | `generic-prometheus` | Community `http_requests_total` / classic exporter naming |
 | `spring-micrometer` | Spring Boot Actuator / Micrometer (`http_server_requests_seconds_*`, HikariCP, JVM) |
+
+Not sure which? Query your Prometheus for `http_requests_total` and
+`http_server_requests_seconds_count` and see which one returns series.
 
 Every preset chain is rooted at `generic-prometheus`, so a partial overlay can
 never resolve a section to nothing. Presets carry naming conventions, **not**
@@ -167,13 +339,17 @@ diagnostic-agent/
 
 Both bundled examples use this layout — see
 [`examples/hello-world/`](../examples/hello-world/) and
-[`examples/spring-modular-monolith/`](../examples/spring-modular-monolith/).
+[`examples/spring-modular-monolith/`](../examples/spring-modular-monolith/). The
+`profile/` subdirectory is worth it only when the workspace also holds a lot of
+non-profile material and you want the separation.
 
 ---
 
 ## File-by-file reference
 
 ### `metrics_profile.yaml`
+
+**In one line.** The PromQL the agent runs to see how a service is behaving.
 
 **Purpose.** PromQL templates the agent substitutes with `{service}` / `{window}`
 (and related placeholders) when probing error rate, latency, saturation, and
@@ -198,10 +374,21 @@ extends: spring-micrometer
 #     sum(rate(http_server_requests_seconds_count{...}[{window}])) / ...
 ```
 
+| Field | Meaning |
+|---|---|
+| `templates` | Named PromQL strings. `{service}` and `{window}` are substituted per alert |
+| `service_kinds` | Which `kind` values from `service_map.yaml` receive the standard service suite |
+| `service_metrics` | Which template names make up that suite (error rate, latency, …) |
+| `always_collect` | Templates always run on the alerting service, e.g. `db_pool_pending` |
+| `dependency_probes` | `kind` → template name or inline PromQL, for backing stores that get no service suite |
+
 Install writes a one-line stub. Prefer copying
 `examples/spring-modular-monolith/metrics_profile.yaml` for Spring hosts.
 
 ### `logs_profile.yaml`
+
+**In one line.** How to turn an alert into a Loki query that returns the
+interesting lines and not the whole stream.
 
 **Purpose.** Controls how the agent queries Loki: which label is the service
 key, default level gate, optional JSON parsing, module extraction, and
@@ -232,7 +419,14 @@ alert_line_filters:
   PostgresErrorsInLogs: "(?i)(postgres|jdbc|hikari).*(refused|timeout)"
 ```
 
+The single highest-value entry here is `alert_line_filters`: mirror the regex
+your Loki ruler already uses for a log-based alert, and the agent reads the same
+lines that fired it instead of a generic error sample.
+
 ### `prompt_profile.yaml`
+
+**In one line.** Your stack described in your own words, so the model speaks
+your vocabulary and suggests commands that exist.
 
 **Purpose.** Host-specific framing injected into the LLM prompt:
 `platform_description` and `tool_run_hints`.
@@ -255,6 +449,9 @@ naming matrix → golden/forbidden commands). Short version:
 
 ### `redaction.yaml`
 
+**In one line.** The regexes that scrub anything that must never appear in a
+Slack message, an email, or the audit log.
+
 **Purpose.** Regex rules that scrub secrets and tenant/PII from reports, email,
 annotations, and audit-adjacent surfaces.
 
@@ -274,9 +471,19 @@ rules:
     flags: IGNORECASE
 ```
 
+| Field | Meaning |
+|---|---|
+| `name` | Rule identifier. Reusing a preset rule's name replaces that rule |
+| `pattern` | Regex to match. Capture groups are referenced from `replacement` |
+| `replacement` | Substitution, e.g. `\1[REDACTED]\2` to keep the surrounding text |
+| `flags` | `IGNORECASE`, or empty for none |
+
 Verify with `diag validate` or `GET /health` → `redaction_rules` count.
 
 ### `service_map.yaml`
+
+**In one line.** Your architecture diagram, in a form the agent can traverse to
+ask "what else might be broken?"
 
 **Purpose.** Declares services, dependency edges, and optional log routing.
 This is the blast-radius graph.
@@ -304,10 +511,42 @@ names**.
 | `log_selector` | Full stream selector override when needed |
 | `module_dependencies` | Optional in-process module graph for monoliths |
 
+```yaml
+services:
+  api:
+    kind: http
+    downstream: [app]
+    description: "Edge / reverse proxy"
+  app:
+    kind: monolith
+    upstream: [api]
+    downstream: [postgres, redis]
+  postgres:
+    kind: database
+    upstream: [app]
+    # Postgres does not ship logs to Loki; its errors land in the app stream.
+    log_services: [app]
+```
+
+Three things worth getting right, because they are the ones that quietly cost
+you accuracy:
+
+- **Names must match your alert labels.** A node the alert's `service=` value
+  cannot resolve to means no topology at all for that alert.
+- **`kind` is what selects queries**, so a mislabelled node simply gets no
+  metrics.
+- **`log_services` / `log_selector` handle the common case where a thing does
+  not log under its own name** — managed databases, external APIs, browser
+  telemetry under an `app=` label, or a logical alert target like `security`.
+
 See `examples/spring-modular-monolith/service_map.yaml` for a modular-monolith
-shape.
+shape, including a `module_dependencies` graph that widens the blast radius when
+a log line identifies which module inside the monolith is failing.
 
 ### `execution_profile.yaml` (optional)
+
+**In one line.** The short, explicit list of commands the agent is ever allowed
+to run — absent this file, it can only report.
 
 **Purpose.** The allowlist of actions the agent may run in its sandbox. This is
 the only place an action can come from — presets ship **zero** actions, and
@@ -361,6 +600,9 @@ threat model and the container lockdown flags, and
 
 ### `scenarios.yaml`
 
+**In one line.** Example alerts, each paired with the runbook it should reach,
+so the offline tools have something to check.
+
 **Purpose.** Declares alert label sets paired with runbooks for
 `diag lint` / `diag e2e` / `diag replay` (and related corpus checks).
 
@@ -395,6 +637,9 @@ See [eval/README.md](../eval/README.md#routing-replay-eval-diag-replay).
 
 ### `blind_eval.yaml` (optional)
 
+**In one line.** Synthetic incidents with known answers, used to score whether
+the agent actually finds the right root cause.
+
 **Purpose.** Synthetic cases (injected logs + ground truth) for
 `diag eval blind`. Independent of runbooks so answers do not leak via RAG.
 
@@ -406,6 +651,9 @@ Install workspaces often omit this file. Either add one, copy from
 [eval/README.md](../eval/README.md).
 
 ### `runbooks/`
+
+**In one line.** Your team's accumulated knowledge, in markdown, retrieved by
+similarity when an alert looks like something you have seen before.
 
 **Purpose.** Markdown playbooks indexed for RAG when retrieval is enabled.
 
@@ -421,7 +669,29 @@ and alert annotations often reference them.
    corpus changes so the index refreshes.
 4. `diag lint` checks corpus consistency without an LLM.
 
+Authoring rules, chunking behaviour, and the `runbook-actions` block are in
+[runbooks/README.md](../runbooks/README.md). A runbook is also the most valuable
+thing you can contribute upstream — see
+[CONTRIBUTING.md](../CONTRIBUTING.md#the-contribution-loop-preferred).
+
 ---
+
+## When the workspace is wrong
+
+Most workspace mistakes are quiet rather than fatal, which is why
+`diag validate` exists. The common ones:
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Agent refuses to start, complains about redaction | The profile resolved to zero rules — usually a mis-pointed or empty mount, so nothing was found | Check the mount path; see [fail-closed](#redaction-is-fail-closed) |
+| Agent refuses to start, names a YAML file | A profile file exists but does not parse. This is deliberate: a broken overlay must not silently fall back to preset-only config | Fix the YAML; `diag validate` reports the same error |
+| Report has no blast radius | No `service_map.yaml`, or the alert's `service=` value is not a node in it | Add the node, matching the alert label exactly |
+| Metrics are all empty | Preset does not match your metric naming, or the node's `kind` is not in `service_kinds` | Check `extends:`; query Prometheus for the metric name the preset uses |
+| A dependency contributes no metrics | Its `kind` has no `dependency_probes` entry | Add one, or copy the `spring-micrometer` preset's |
+| Log sample is empty | Wrong `service_label`, or the thing does not log under its own name | Set `log_services` / `log_selector` on that node |
+| Log sample is noise | No `alert_line_filters` entry for that alertname | Mirror your Loki ruler's regex |
+| Edits appear to do nothing | The profile is cached for the process lifetime | Restart or recreate the container |
+| `diag validate` warns about a version mismatch | `agent_version` predates the running image | Review the changelog, then bump the pin |
 
 ## Precedence
 
@@ -431,6 +701,10 @@ Environment wins so a container can retarget a setting without editing the host
 repository. `AGENT_PROFILE_DIR` and `AGENT_RUNBOOKS_PATH` are derived from the
 workspace only when they are not already set. Runtime URLs and LLM settings
 normally live in `agent/.env` from install — see [INSTALL.md](INSTALL.md).
+
+One exception to the "later wins" rule: `redaction.yaml` **rules accumulate**
+along the chain instead of replacing each other, so extending a preset can never
+lose its secret scrubbing.
 
 ## Redaction is fail-closed
 
