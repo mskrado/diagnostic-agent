@@ -17,7 +17,7 @@ Topics:
 5. [Requirements & Issue Workflow](#5-requirements--issue-workflow)
 6. [CI/CD Pipelines](#6-cicd-pipelines)
 7. [Release](#7-release)
-8. [Relationship to host repositories](#8-relationship-to-host-repositories)
+8. [Relationship to host repositories](#8-relationship-to-client-forks)
 9. [Agent playbook](#9-agent-playbook-deterministic-recipe)
 
 ---
