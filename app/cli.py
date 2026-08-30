@@ -463,10 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
     from .install.cli import add_install_parser
     from .install.init_cli import add_init_parser
     from .fork.upgrade_cli import add_upgrade_parser
+    from .scan.cli import add_scan_parser
 
     add_install_parser(sub)
     add_init_parser(sub)
     add_upgrade_parser(sub)
+    add_scan_parser(sub)
 
     return parser
 
