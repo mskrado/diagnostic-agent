@@ -9,10 +9,17 @@ pip install -e ".[dev]"   # or: pip install diagnostic-agent
 diag install --output ./deploy
 ```
 
+No usable host Python (≥3.11)? Use a one-shot container instead — see
+[Obtaining the `diag` CLI](#obtaining-the-diag-cli) below.
+
 This guide covers **interactive** and **non-interactive** modes, every parameter
 that is collected (why it exists, required vs optional), examples, what to do
 after generation, **how to deploy the bundle to a remote host**, and how to run
 the agent as a **Docker image** or a **standalone `diag serve` process**.
+
+For the **client fork** layout (`diag init` → `client/`), see
+[CLIENT_FORK.md](CLIENT_FORK.md). Dependency files and host bootstrap scripts:
+[DEPENDENCIES.md](DEPENDENCIES.md).
 
 Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
 [TESTING.md](TESTING.md)
@@ -21,19 +28,69 @@ Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) �
 
 ## Topics
 
-1. [Modes at a glance](#modes-at-a-glance)
-2. [Interactive mode](#interactive-mode)
-3. [Non-interactive mode](#non-interactive-mode)
-4. [CLI flags reference](#cli-flags-reference)
-5. [Parameters collected (full reference)](#parameters-collected-full-reference)
-6. [What gets generated](#what-gets-generated)
-7. [After install](#after-install)
-8. [Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)
-9. [Run the agent (Docker image or standalone process)](#run-the-agent-docker-image-or-standalone-process)
-10. [Graceful degradation](#graceful-degradation)
-11. [Troubleshooting](#troubleshooting)
-12. [Requirements](#requirements)
-13. [Quick recipe card](#quick-recipe-card)
+1. [Obtaining the `diag` CLI](#obtaining-the-diag-cli)
+2. [Modes at a glance](#modes-at-a-glance)
+3. [Interactive mode](#interactive-mode)
+4. [Non-interactive mode](#non-interactive-mode)
+5. [CLI flags reference](#cli-flags-reference)
+6. [Parameters collected (full reference)](#parameters-collected-full-reference)
+7. [What gets generated](#what-gets-generated)
+8. [After install](#after-install)
+9. [Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)
+10. [Run the agent (Docker image or standalone process)](#run-the-agent-docker-image-or-standalone-process)
+11. [Graceful degradation](#graceful-degradation)
+12. [Troubleshooting](#troubleshooting)
+13. [Requirements](#requirements)
+14. [Quick recipe card](#quick-recipe-card)
+
+---
+
+## Obtaining the `diag` CLI
+
+`diag install` / `diag init` are generators: they need a working Python ≥3.11
+**once** to write files. How you obtain the CLI is independent of how you later
+**run** the agent (Compose, `docker run`, or host `diag serve`).
+
+### Host Python (when the machine already has ≥3.11)
+
+```bash
+./scripts/install-system-deps.sh   # optional OS packages; see DEPENDENCIES.md
+./scripts/bootstrap-venv.sh        # .venv from requirements.lock
+source .venv/bin/activate
+diag install --output ./deploy
+# or: diag init
+```
+
+### One-shot Docker (no usable host Python — typical Amazon Linux 2)
+
+Run the generator inside a short-lived container; the bind mount writes the
+bundle (or `client/` for `diag init`) onto the host. Nothing has to keep running
+in Docker afterward unless you choose a Docker **runtime**.
+
+From the repository root:
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag install --output ./deploy --accept-defaults --allow-degraded'
+```
+
+Client-fork scaffold instead of a throwaway bundle:
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
+```
+
+`--network host` lets discovery reach Prometheus/Loki on the host’s published
+ports. Drop it if you only pass URLs via flags and do not need local probes.
+
+Same recipe (with more AL2 / upgrade context): [CLIENT_FORK.md §2](CLIENT_FORK.md#2-initialize-your-deployment).
 
 ---
 
@@ -822,8 +879,12 @@ partial bundle.
 
 ## Requirements
 
-- Python **3.11+** and the `diagnostic-agent` package (`pip install -e ".[dev]"` or from PyPI when published)
-- **Optional but recommended:** Docker CLI (introspection + `--start`), `ssh` (remote `--ssh`), `promtool` (extra rule lint on verify)
+- **Either** Python **3.11+** and the `diagnostic-agent` package
+  (`./scripts/bootstrap-venv.sh`, `pip install -e ".[dev]"`, or PyPI when published),
+  **or** Docker to run the [one-shot generator](#obtaining-the-diag-cli) when the
+  host has no usable Python (e.g. Amazon Linux 2)
+- **Optional but recommended:** Docker CLI (introspection + `--start` + one-shot
+  init), `ssh` (remote `--ssh`), `promtool` (extra rule lint on verify)
 
 Thin wrappers (same args as `diag install`):
 
@@ -832,11 +893,19 @@ Thin wrappers (same args as `diag install`):
 pwsh ./scripts/diag-install.ps1 --output ./deploy
 ```
 
+Full dependency layout: [DEPENDENCIES.md](DEPENDENCIES.md). Client-fork init
+without host Python: [CLIENT_FORK.md](CLIENT_FORK.md).
+
 ---
 
 ## Quick recipe card
 
 ```bash
+# 0) Get `diag` — host venv OR one-shot Docker (see Obtaining the diag CLI)
+#    ./scripts/bootstrap-venv.sh && source .venv/bin/activate
+#    # or: docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+#    #        bash -c 'pip install -q -e . && diag install --output ./deploy --accept-defaults --allow-degraded'
+
 # 1) Preview against the local host
 diag install --output ./deploy --dry-run
 
