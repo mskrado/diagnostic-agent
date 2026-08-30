@@ -1,50 +1,152 @@
 # Installing diagnostic-agent
 
-`diag install` discovers observability tools on a host, collects every parameter
-the agent needs to run, and writes a complete install bundle (agent build/run
-files **and** observability wiring) into a directory you choose.
+**Default path: client fork.** Hold a private copy of this repository and run
+`diag init` to scaffold your deployment under `client/`. That is the supported
+production layout (start scripts, upgrades, ownership boundary). Full lifecycle:
+**[CLIENT_FORK.md](CLIENT_FORK.md)**.
 
 ```bash
-pip install -e ".[dev]"   # or: pip install diagnostic-agent
-diag install --output ./deploy
+# From a clone of your private fork (or upstream, then mirror — see CLIENT_FORK.md)
+./scripts/bootstrap-venv.sh && source .venv/bin/activate   # or one-shot Docker below
+diag init
+cp client/agent/.env.example client/agent/.env   # fill secrets
+./client/scripts/start.sh
 ```
 
-This guide covers **interactive** and **non-interactive** modes, every parameter
-that is collected (why it exists, required vs optional), examples, what to do
-after generation, **how to deploy the bundle to a remote host**, and how to run
-the agent as a **Docker image** or a **standalone `diag serve` process**.
+`diag init` and `diag install` share the same discovery and parameter collection.
+This guide documents those shared mechanics (modes, flags, parameters, remote
+deploy, Docker vs standalone runtime). Use **`diag init`** unless you explicitly
+want a **throwaway** bundle under `deploy/` (gitignored) via `diag install`.
 
-Related docs: [INTEGRATING.md](INTEGRATING.md) · [WORKSPACE.md](WORKSPACE.md) ·
-[TESTING.md](TESTING.md)
+Dependency files and host bootstrap: [DEPENDENCIES.md](DEPENDENCIES.md).
+
+Related docs: [CLIENT_FORK.md](CLIENT_FORK.md) · [INTEGRATING.md](INTEGRATING.md) ·
+[WORKSPACE.md](WORKSPACE.md) · [TESTING.md](TESTING.md)
 
 ---
 
 ## Topics
 
-1. [Modes at a glance](#modes-at-a-glance)
-2. [Interactive mode](#interactive-mode)
-3. [Non-interactive mode](#non-interactive-mode)
-4. [CLI flags reference](#cli-flags-reference)
-5. [Parameters collected (full reference)](#parameters-collected-full-reference)
-6. [What gets generated](#what-gets-generated)
-7. [After install](#after-install)
-8. [Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)
-9. [Run the agent (Docker image or standalone process)](#run-the-agent-docker-image-or-standalone-process)
-10. [Graceful degradation](#graceful-degradation)
-11. [Troubleshooting](#troubleshooting)
-12. [Requirements](#requirements)
-13. [Quick recipe card](#quick-recipe-card)
+1. [Default: client fork (`diag init`)](#default-client-fork-diag-init)
+2. [Throwaway bundles (`diag install`)](#throwaway-bundles-diag-install)
+3. [Obtaining the `diag` CLI](#obtaining-the-diag-cli)
+4. [Modes at a glance](#modes-at-a-glance)
+5. [Interactive mode](#interactive-mode)
+6. [Non-interactive mode](#non-interactive-mode)
+7. [CLI flags reference](#cli-flags-reference)
+8. [Parameters collected (full reference)](#parameters-collected-full-reference)
+9. [What gets generated](#what-gets-generated)
+10. [After install](#after-install)
+11. [Deploy the install bundle to a remote host](#deploy-the-install-bundle-to-a-remote-host)
+12. [Run the agent (Docker image or standalone process)](#run-the-agent-docker-image-or-standalone-process)
+13. [Graceful degradation](#graceful-degradation)
+14. [Troubleshooting](#troubleshooting)
+15. [Requirements](#requirements)
+16. [Quick recipe card](#quick-recipe-card)
+
+---
+
+## Default: client fork (`diag init`)
+
+| | |
+|---|---|
+| **Command** | `diag init` |
+| **Output** | `client/` (workspace, compose, scripts, observability snippets, `.upstream-version`) |
+| **When** | Every normal deployment — private fork, upgrades via `diag upgrade` |
+| **Guide** | [CLIENT_FORK.md](CLIENT_FORK.md) |
+
+```bash
+diag init
+# common non-interactive:
+diag init --accept-defaults --allow-degraded
+diag init --pull-image --agent-image ghcr.io/mskrado/diagnostic-agent:1.1.4
+```
+
+Then: review `client/workspace/service_map.yaml`, copy `.env`, start with
+`./client/scripts/start.sh` (or the generated systemd unit for host `diag serve`).
+
+You do **not** also run `diag install` for the fork model.
+
+---
+
+## Throwaway bundles (`diag install`)
+
+| | |
+|---|---|
+| **Command** | `diag install --output ./deploy` |
+| **Output** | Directory you choose (convention: `deploy/`, gitignored) |
+| **When** | CI experiments, one-off bundles, copy-to-remote without a fork |
+| **Not for** | Long-lived client ownership under `client/` |
+
+```bash
+diag install --output ./deploy
+# then follow ./deploy/APPLY.md
+```
+
+The rest of this document’s flag and parameter reference applies to **both**
+commands (shared collector). Examples often show `diag install --output ./deploy`;
+for production, substitute `diag init` and paths under `client/`
+(`client/workspace/…`, `client/agent/…`, `./client/scripts/start.sh`).
+
+---
+
+## Obtaining the `diag` CLI
+
+`diag init` / `diag install` are generators: they need a working Python ≥3.11
+**once** to write files. How you obtain the CLI is independent of how you later
+**run** the agent (Compose, `docker run`, or host `diag serve`).
+
+### Host Python (when the machine already has ≥3.11)
+
+```bash
+./scripts/install-system-deps.sh   # optional OS packages; see DEPENDENCIES.md
+./scripts/bootstrap-venv.sh        # .venv from requirements.lock
+source .venv/bin/activate
+diag init                          # default
+# diag install --output ./deploy   # throwaway only
+```
+
+### One-shot Docker (no usable host Python — typical Amazon Linux 2)
+
+Run the generator inside a short-lived container; the bind mount writes
+`client/` (or a bundle) onto the host. Nothing has to keep running in Docker
+afterward unless you choose a Docker **runtime**.
+
+**Default — client fork:**
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
+```
+
+**Throwaway bundle:**
+
+```bash
+docker run --rm \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag install --output ./deploy --accept-defaults --allow-degraded'
+```
+
+`--network host` lets discovery reach Prometheus/Loki on the host’s published
+ports. Drop it if you only pass URLs via flags and do not need local probes.
+
+Same recipes (upgrades, AL2 notes): [CLIENT_FORK.md §2](CLIENT_FORK.md#2-initialize-your-deployment).
 
 ---
 
 ## Modes at a glance
 
-| Mode | When to use | How |
-|---|---|---|
-| **Interactive** (default) | First-time install; **confirm every parameter** after discovery (Enter keeps defaults) | `diag install --output ./deploy` |
-| **Accept defaults** | Re-run against a stack you already trust; resolves interactively but never prompts | `diag install --output ./deploy --accept-defaults` |
-| **Non-interactive** | CI/CD, automation, remote unattended hosts | `diag install --output ./deploy --non-interactive --yes` plus flags/env for anything discovery cannot fill |
-| **Dry-run** | Preview discovery + file plan without writing | add `--dry-run` to any mode |
+| Mode | When to use | Fork (default) | Throwaway bundle |
+|---|---|---|---|
+| **Interactive** | First-time; confirm every parameter after discovery | `diag init` | `diag install --output ./deploy` |
+| **Accept defaults** | Trusted stack; no prompts | `diag init --accept-defaults` | `diag install --output ./deploy --accept-defaults` |
+| **Non-interactive** | CI/CD, unattended | `diag init --non-interactive --yes …` | `diag install --output ./deploy --non-interactive --yes …` |
+| **Dry-run** | Preview without writing | add `--dry-run` | add `--dry-run` |
 
 If stdin is not a terminal (piped input, CI shell), interactive mode switches
 itself to non-interactive and says so, rather than silently accepting defaults.
@@ -78,7 +180,8 @@ as `***`). They only land in `agent/.env`, which is gitignored in the bundle.
 Best for humans standing up the agent against a live stack.
 
 ```bash
-diag install --output ./deploy
+diag init                              # default (client/)
+# diag install --output ./deploy       # throwaway bundle only
 ```
 
 ### What you will see
@@ -201,6 +304,23 @@ diag install \
 Never prompts. Anything discovery cannot supply must come from **flags** or
 **environment variables**. Use for pipelines and scripted rollouts.
 
+**Default (client fork):**
+
+```bash
+diag init \
+  --non-interactive \
+  --yes \
+  --prometheus-url http://prometheus:9090 \
+  --loki-url http://loki:3100 \
+  --grafana-url http://grafana:3000 \
+  --alertmanager-url http://alertmanager:9093 \
+  --preset spring-micrometer \
+  --chat-provider bedrock_converse \
+  --chat-model amazon.nova-micro-v1:0
+```
+
+**Throwaway bundle:**
+
 ```bash
 diag install \
   --output ./deploy \
@@ -239,10 +359,13 @@ export AGENT_GRAFANA_TOKEN="glsa_..."          # optional
 export OPENAI_API_KEY="sk-..."                 # or AWS_* for Bedrock
 export AWS_REGION=us-east-1
 
-diag install --output ./deploy --non-interactive --yes --dry-run   # preview
-diag install --output ./deploy --non-interactive --yes             # write
-# optional:
-diag install --output ./deploy --non-interactive --yes --apply --start
+diag init --non-interactive --yes --dry-run   # preview (fork)
+diag init --non-interactive --yes             # write client/
+
+# Throwaway alternative:
+# diag install --output ./deploy --non-interactive --yes --dry-run
+# diag install --output ./deploy --non-interactive --yes
+# diag install --output ./deploy --non-interactive --yes --apply --start
 ```
 
 `--yes` skips the confirmation prompt that `--apply` would otherwise show before
@@ -411,9 +534,25 @@ without Mailpit → email stays disabled.
 
 ## What gets generated
 
-The install output is **self-sufficient**. You do **not** need a separate host
-monorepo path for validate / lint / eval / run — everything lives under
-`--output`.
+**Client fork (`diag init`)** — default production layout under `client/`:
+
+```text
+client/
+├── workspace/                  # profiles, service_map, runbooks, scenarios
+├── agent/                      # Compose, Dockerfile, .env / .env.example
+├── observability/              # snippets to merge into live stack
+├── scripts/                    # start.sh, stop.sh, status.sh, …
+├── systemd/                    # diagnostic-agent.service (host serve)
+├── docs/OPERATIONS.md
+├── .upstream-version
+├── install-report.json
+└── APPLY.md
+```
+
+Full table: [CLIENT_FORK.md §2](CLIENT_FORK.md#2-initialize-your-deployment).
+
+**Throwaway (`diag install --output …`)** — self-sufficient directory (no fork
+scripts). Everything for validate / lint / eval / run lives under `--output`:
 
 ```text
 <output>/
@@ -438,6 +577,10 @@ monorepo path for validate / lint / eval / run — everything lives under
 └── APPLY.md                    # ordered apply + eval instructions
 ```
 
+Paths in the table below are relative to the install root (`client/` or
+`--output`). For the fork, workspace files live at `workspace/*` (not under
+`agent/`); for throwaway bundles they live at `agent/workspace/*`.
+
 ### Bundle file guide
 
 Workspace YAMLs are documented in depth in [WORKSPACE.md](WORKSPACE.md)
@@ -446,10 +589,10 @@ generated files repeat the same instructions.
 
 | Path | Role | What you do after install |
 |---|---|---|
-| `agent/.env` | Runtime settings: Prometheus/Loki/Grafana URLs, LLM provider + models, SMTP, redaction/RAG flags, image pin. Loaded by Compose via `env_file`. | Fill secrets (API keys, `AGENT_GRAFANA_TOKEN`, AWS keys if Bedrock). Keep `AGENT_DEFAULT_PRESET` aligned with `workspace/agent.yaml` `extends`. **Do not commit.** |
-| `agent/docker-compose.yml` | Runs the published image, mounts `./workspace` → `/workspace:ro`, joins the discovered Docker network when present. | `docker compose --env-file .env up -d`. Adjust published port or image pin if needed. |
-| `agent/Dockerfile` | Optional thin `FROM` wrapper around the GHCR image. | Prefer pulling the image via Compose; build only if your registry policy requires it. |
-| `agent/workspace/*` | Integration profile + runbooks the agent reads on every diagnosis. | Edit `service_map.yaml` and profile overlays to match your stack; see WORKSPACE.md. |
+| `agent/.env` | Runtime settings: Prometheus/Loki/Grafana URLs, LLM provider + models, SMTP, redaction/RAG flags, image pin. Loaded by Compose via `env_file`. | Fill secrets (API keys, `AGENT_GRAFANA_TOKEN`, AWS keys if Bedrock). Keep `AGENT_DEFAULT_PRESET` aligned with workspace `agent.yaml` `extends`. **Do not commit.** |
+| `agent/docker-compose.yml` | Runs the image, mounts workspace → `/workspace:ro`, joins the discovered Docker network when present. | `docker compose --env-file .env up -d` (or `./client/scripts/start.sh`). Adjust published port or image pin if needed. |
+| `agent/Dockerfile` | Optional thin `FROM` wrapper / self-build context. | Prefer Compose start; build when using fork self-build (default for `diag init`). |
+| `workspace/*` (fork) / `agent/workspace/*` (bundle) | Integration profile + runbooks the agent reads on every diagnosis. | Edit `service_map.yaml` and profile overlays to match your stack; see WORKSPACE.md. |
 | `observability/prometheus/alert-rules.generated.yml` | Alert rule group intersecting the shipped runbook catalog. | **Merge** into Prometheus `rule_files` (not a full replacement), then reload. |
 | `observability/alertmanager/route.generated.yml` | Additive route/receiver → agent webhook. | Merge into Alertmanager config and reload. |
 | `observability/promtail/promtail.generated.yaml` | Snippet reminding you to emit `service=` labels. | Align scrapes with `service_map.yaml` names. |
@@ -457,9 +600,6 @@ generated files repeat the same instructions.
 | `install-report.json` | Discovery inventory, decisions, warnings (secrets redacted). | Review placement/URLs before applying. |
 | `APPLY.md` | Ordered apply checklist + **Testing** section with **bash and PowerShell** examples (health, `POST /alert`, offline/live blind eval with `--limit` / `--only` / `--judge`). | Follow top to bottom; run the Testing commands before declaring the install done. |
 
-Alert rules are **only** the alerts that intersect the shipped runbook corpus
-(so the agent can actually diagnose them). They are not a full replacement for
-your existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 | Preset | Workspace profile seeding |
 |---|---|
 | `generic-prometheus` | Thin `extends:` stubs + starter 3-tier `service_map.yaml` |
@@ -472,6 +612,17 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 ---
 
 ## After install
+
+### Client fork (default)
+
+1. Review `client/workspace/service_map.yaml` and `client/APPLY.md`
+   / `client/docs/OPERATIONS.md`.
+2. `cp client/agent/.env.example client/agent/.env` and fill secrets.
+3. Start: `./client/scripts/start.sh` (or `diag serve` via the generated systemd unit).
+4. Merge `client/observability/` into your live Prometheus/Alertmanager stack.
+5. Upgrades: `diag upgrade` — see [CLIENT_FORK.md](CLIENT_FORK.md).
+
+### Throwaway bundle (`deploy/`)
 
 1. **Review** `install-report.json` (placement, URLs, warnings) and edit
    `agent/workspace/service_map.yaml` only if your service names differ.
@@ -513,7 +664,7 @@ existing Prometheus rules—merge the `diagnostic-agent.generated` group.
 
 ### Idempotent re-runs
 
-Re-running `diag install --output ./deploy` is safe:
+Re-running `diag init` or `diag install --output ./deploy` is safe:
 
 - Identical content → no rewrite  
 - Differing content → timestamped `*.bak.<utc>` backup, then replace  
@@ -822,43 +973,54 @@ partial bundle.
 
 ## Requirements
 
-- Python **3.11+** and the `diagnostic-agent` package (`pip install -e ".[dev]"` or from PyPI when published)
-- **Optional but recommended:** Docker CLI (introspection + `--start`), `ssh` (remote `--ssh`), `promtool` (extra rule lint on verify)
+- **Either** Python **3.11+** and the `diagnostic-agent` package
+  (`./scripts/bootstrap-venv.sh`, `pip install -e ".[dev]"`, or PyPI when published),
+  **or** Docker to run the [one-shot generator](#obtaining-the-diag-cli) when the
+  host has no usable Python (e.g. Amazon Linux 2)
+- **Optional but recommended:** Docker CLI (introspection + `--start` + one-shot
+  init), `ssh` (remote `--ssh`), `promtool` (extra rule lint on verify)
 
-Thin wrappers (same args as `diag install`):
+Default install command: **`diag init`** → `client/`. Full fork lifecycle:
+[CLIENT_FORK.md](CLIENT_FORK.md).
+
+Thin wrappers for the throwaway **`diag install`** path:
 
 ```bash
 ./scripts/diag-install.sh --output ./deploy
 pwsh ./scripts/diag-install.ps1 --output ./deploy
 ```
 
+Full dependency layout: [DEPENDENCIES.md](DEPENDENCIES.md).
+
 ---
 
 ## Quick recipe card
 
 ```bash
-# 1) Preview against the local host
+# 0) Get `diag` — host venv OR one-shot Docker (see Obtaining the diag CLI)
+#    ./scripts/bootstrap-venv.sh && source .venv/bin/activate
+#    # or: docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+#    #        bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
+
+# === Default: client fork ===
+diag init --dry-run
+diag init
+cp client/agent/.env.example client/agent/.env
+./client/scripts/start.sh
+
+# Non-interactive fork scaffold
+diag init --accept-defaults --allow-degraded --yes
+
+# === Throwaway bundle only (not the fork model) ===
 diag install --output ./deploy --dry-run
-
-# 2) Interactive install
 diag install --output ./deploy
-
-# 3) Discover a remote stack from your laptop, write a local bundle
 diag install --output ./deploy-ops \
   --target ops.example.com \
   --ssh ec2-user@ops.example.com
-
-# 4) Non-interactive / CI
 diag install --output ./deploy --non-interactive --yes \
   --prometheus-url http://prometheus:9090 \
   --loki-url http://loki:3100 \
   --preset generic-prometheus \
   --chat-provider ollama
-
-# 5) Generate, reload stack, start agent (same host)
-diag install --output ./deploy --non-interactive --yes --apply --start
-
-# 6) Or copy the bundle to a remote host and start there — see
-#    “Deploy the install bundle to a remote host” and
-#    “Run the agent (Docker image or standalone process)” above.
+# Copy deploy/ to a remote host if needed — see “Deploy the install bundle…”
 ```

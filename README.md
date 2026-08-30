@@ -39,7 +39,7 @@ Additional documentation:
 |---|---|
 | [docs/CLIENT_FORK.md](docs/CLIENT_FORK.md) | **Client fork model**: private repo copy, `diag init`, start scripts, `diag upgrade`, offline packs |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Python + OS dependency layout, `requirements.lock`, host bootstrap scripts |
-| [docs/INSTALL.md](docs/INSTALL.md) | `diag install` end to end: parameters, generated files, **remote bundle deploy**, Docker image vs standalone `diag serve`, troubleshooting |
+| [docs/INSTALL.md](docs/INSTALL.md) | **Default install = client fork** (`diag init`): shared discovery/flags with `diag install`, obtaining `diag` via host venv or one-shot Docker, throwaway bundles, remote deploy, Docker vs standalone `diag serve` |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
 | [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
 | [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |
@@ -72,7 +72,8 @@ Full lifecycle (private copy, upgrades, air gap, Docker-only init on Amazon Linu
 ## Quick start — install bundle (throwaway)
 
 Discover running observability tools and generate a complete agent + wiring
-bundle. Full guide (interactive vs non-interactive, every parameter):  
+bundle **without** a client fork. Prefer the [client fork](#quick-start--client-fork)
+for production. Flag/parameter reference (shared with `diag init`):  
 **[docs/INSTALL.md](docs/INSTALL.md)**
 
 ```bash
