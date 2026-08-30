@@ -33,7 +33,9 @@ the agent's `.env`, not in the workspace.
 You do not have to write the first version by hand. [`diag scan`](SCAN.md)
 reports what your stack already exposes, and [`diag draft`](DRAFT.md) turns that
 into these files, writing only the values it could confirm against your live
-Prometheus and Loki. Read this page to understand what you are reviewing.
+Prometheus and Loki. Later, [`diag drift`](DRIFT.md) re-checks the workspace
+against fresh evidence and fails when coverage goes stale. Read this page to
+understand what you are reviewing.
 
 ## The shape of a workspace
 
