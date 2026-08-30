@@ -80,9 +80,10 @@ detect → retrieve → rag_lookup → correlate → report
 after graph.invoke(): PagerDuty → audit JSONL → Grafana annotation → email → Slack
 ```
 
-Operator-facing documentation for what is built: [README](../../README.md#runbook-execution-opt-in),
-[`execution_profile.yaml`](../WORKSPACE.md#execution_profileyaml-optional), and
+Operator-facing documentation for what is built:
+[`execution_profile.yaml`](../WORKSPACE.md#execution_profileyaml-optional) and
 [`runbook-actions`](../../runbooks/README.md#executable-steps-runbook-actions).
+The landing page: [README](../../README.md).
 
 ---
 

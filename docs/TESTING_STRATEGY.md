@@ -265,8 +265,8 @@ and produce an audit record. This is the only layer that validates the host's
 
 ## 3. Configuration matrix
 
-Agent runtime settings (all `AGENT_*`, see [Configuration in the
-README](../README.md#configuration)) that materially change test behaviour:
+Agent runtime settings (all `AGENT_*`, see
+[`.env.example`](../.env.example)) that materially change test behaviour:
 
 | Setting | Why it matters for testing |
 |---|---|

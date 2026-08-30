@@ -99,7 +99,8 @@ This is the intended sidecar model: run one agent per observability stack, each
 with its own workspace, `.env`, and Alertmanager webhook URL, which keeps
 credentials and retrieved runbooks scoped to a single environment. Editing
 workspace files therefore requires a **restart or container recreate** to take
-effect. See [README → Deployment model](../README.md#deployment-model-one-agent-per-stack).
+effect. One agent per stack is the intended model — see the
+[README](../README.md#why-people-deploy-it).
 
 ## Manifest (`agent.yaml`)
 

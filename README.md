@@ -1,99 +1,158 @@
 # diagnostic-agent
 
-A **config-driven**, reactive diagnostic agent for Prometheus / Alertmanager.
+**When the pager fires at 3 a.m., you should already have a hypothesis — not a
+blank Slack thread.**
 
-When an alert fires, the agent pulls **metrics** (Prometheus), **logs** (Loki),
-and **dependency context**, retrieves relevant **runbooks** (RAG), reasons with
-a pluggable LLM, and emits a structured diagnostic report.
+diagnostic-agent sits next to Prometheus and Alertmanager. An alert comes in;
+the agent pulls **metrics**, **logs**, and your **service map**, retrieves the
+runbooks that actually match, reasons with an LLM you choose, and delivers a
+structured report: what failed, what the evidence says, who is in the blast
+radius, and the next commands a human should run.
 
-**Hypotheses only by default — no auto-remediation.** Opt-in
-[runbook execution](#runbook-execution-opt-in) exists behind `AGENT_EXEC_ENABLED`
-and runs only pre-approved, allowlisted actions in a locked-down sandbox. It is
-off unless a host deliberately turns it on.
+**Hypotheses only, by default.** It does not restart pods, flip feature flags,
+or "fix" production. Opt-in sandboxed execution exists for hosts that want it —
+off unless you turn it on.
 
-Deploying means holding a **client fork** of this repository: upstream product
-code plus your deployment under `client/`. Run `diag init` to scaffold compose,
-workspace, and start scripts; pull updates with `diag upgrade`. The single
-install and upgrade guide is **[docs/INSTALL.md](docs/INSTALL.md)**.
+```
+alert → metrics + logs + runbooks → reasoned report → you decide
+```
 
-## Contents
+[Install it](docs/INSTALL.md) · [Add a runbook](#join-the-project) ·
+[Apache-2.0](LICENSE)
 
-Topics in this README:
+---
 
-- [Quick start](#quick-start) — `diag init` scaffolds `client/` in your private repo copy
-- [Try it locally (hello-world workspace)](#try-it-locally-hello-world-workspace) — run the agent against the bundled example
-- [Host workspace](#host-workspace) — manifest, profile files, preset chain, [fail-closed redaction](#redaction-is-fail-closed)
-- [Architecture](#architecture) — alert → LangGraph pipeline → route → report, plus [routing](#routing-opt-in) and [runbook execution](#runbook-execution-opt-in)
-- [Configuration](#configuration) — every `AGENT_` environment variable
-- [Tools](#tools) — `diag validate` / `lint` / `doctor` / `e2e` / `eval` / `replay` / `serve`
-- [Develop](#develop) — local environment and test run
-- [License](#license) · [Contributing](#contributing)
+## The 3 a.m. problem
 
-Additional documentation:
+On-call already has dashboards. What they do **not** have is a first pass that:
 
-| Document | Covers |
+- looks at **this** alert against **this** stack's PromQL and log labels
+- reads **your** runbooks, not a generic chatbot's memory
+- redacts tenant IDs and secrets **before** anything is written down
+- says "I am not sure" when the evidence is thin
+
+That is the gap this project fills. It is config-driven, one agent per stack,
+and built so a private fork can own the workspace while upstream ships the
+engine.
+
+---
+
+## A report you actually get
+
+This is the shape of a live diagnosis — same fields the agent emails, posts to
+Slack, and writes to the audit log. The numbers and log lines come from the
+shipped [Hikari pool eval case](eval/blind_eval_dataset.yaml); a real run on
+your stack fills them from Prometheus and Loki.
+
+```text
+Diagnostic report
+=================
+Alert:     HikariPoolExhaustion
+Service:   platform-service
+Severity:  critical
+Confidence: high
+
+Primary hypothesis (88%)
+  HikariCP is saturated: 20/20 connections active, 47 threads waiting.
+  The database is reachable — nothing is being handed out.
+
+Evidence
+  metric  platform-service.db_pool_pending = 47
+  log     HikariPool-1 - Connection is not available, request timed out
+          after 30000ms (total=20, active=20, idle=0, waiting=47)
+  log     Unable to acquire JDBC Connection; SQLTransientConnectionException
+  runbook runbook-db-pool-exhaustion.md  (RAG hit)
+
+Issue categories
+  database-pool   88%  pool exhausted (active == max)
+  api             61%  elevated 5xx is a symptom of the pool, not the cause
+
+Blast radius
+  platform-service → api-gateway → clients waiting on checkouts
+  postgres itself is healthy; cache/search not implicated
+
+Suggested next steps
+  1. Confirm pool vs. database: is postgres accepting connections?
+  2. Who holds the 20 connections — leak, long transaction, or undersized max?
+
+Tool run examples (copy-paste; you run them)
+  curl -s "$PROM/api/v1/query?query=hikaricp_connections_active{service=\"platform-service\"}"
+  curl -s "$PROM/api/v1/query?query=hikaricp_connections_pending{service=\"platform-service\"}"
+  logcli query '{service="platform-service"} |~ "(?i)connection is not available|waiting="' --limit 20
+
+Fix suggestions (human-run; the agent does not auto-remediate)
+  - Find and kill the stuck transaction or leaking caller
+  - Raise hikari.maximum-pool-size only after you know why 20 is not enough
+  - Add a slow-query / checkout-timeout alert so this pages earlier next time
+
+Hypotheses + guidance only — no auto-remediation.
+```
+
+A weak or empty workspace does not silently invent a cause. Confidence drops,
+redaction is fail-closed, and the report says the data is insufficient.
+
+---
+
+## Why people deploy it
+
+| | |
 |---|---|
-| [docs/INSTALL.md](docs/INSTALL.md) | **The install guide**: private copy, dependencies and `diag` bootstrap, `diag init`, start, wire, verify, `diag upgrade`, air gap, runtimes, throwaway bundles, troubleshooting |
-| [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
-| [docs/INTEGRATING.md](docs/INTEGRATING.md) | Manual wiring without the generator: hand-written workspace, Alertmanager, Compose snippet, CI guard |
-| [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |
-| [docs/TESTING.md](docs/TESTING.md) | Operator E2E: smoke-test, remote rule-path, runbook-e2e wrappers; host vs agent ownership |
-| [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
-| [eval/README.md](eval/README.md) | Blind eval and routing replay: how cases are scored offline |
-| [docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md) | Execution design: threat model, invariants, sandbox/classifier contracts, implementation status |
-| [docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md) | Contribution lifecycle: environments, branching, issue workflow, CI/CD, release |
-| [SECURITY.md](SECURITY.md) | Supported versions, vulnerability reporting, threat model notes |
-| [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to propose changes and the community expectations |
-| [`examples/hello-world/`](examples/hello-world/) · [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) | Reference workspaces to copy and adapt |
+| **Your stack, not a demo** | PromQL templates, Loki labels, topology, and prompt hints live in a [workspace](docs/WORKSPACE.md) you own. Presets cover generic Prometheus and Spring Micrometer; you overlay the rest. |
+| **Your runbooks, retrieved** | Markdown playbooks are indexed (RAG) and pulled in per alert. The preferred contribution to this repo is a runbook + eval case + scenario. |
+| **Evidence or it did not happen** | Every claim has to cite a metric value or a log line the agent was given. Blind eval scores that habit. |
+| **Secrets stay in the stack** | Redaction rules accumulate along the preset chain. Zero rules → the process **refuses to start**. |
+| **One agent, one stack** | Credentials, the RAG index, and the service map are scoped to one workspace. A mis-pointed mount cannot leak another team's runbooks. |
+| **You pick the model** | Ollama, Bedrock, OpenAI, Anthropic, Gemini — same graph. Online hosts pull the image; air-gapped hosts build from the fork. |
 
-## Quick start
+Routing (report / escalate / execute) and sandboxed runbook actions are
+**opt-in** and fail-closed. Defaults never auto-remediate.
+Details: [sandboxed execution](docs/design/sandboxed-execution.md).
 
-Mirror-clone this repo into your organization, then on the deployment host:
+---
+
+## How a diagnosis runs
+
+```
+Prometheus ──▶ Alertmanager ──▶ POST /alert
+                                   │
+                     detect → retrieve → rag_lookup → correlate → report
+                                                                   │
+                                              audit JSONL · email · Slack ·
+                                              PagerDuty · Grafana annotation
+```
+
+1. **Detect** — resolve the service and alert type from labels you already emit.
+2. **Retrieve** — PromQL from your metrics profile; LogQL from your logs profile;
+   blast radius from `service_map.yaml`.
+3. **RAG** — fetch the runbooks that match, if any.
+4. **Correlate** — the LLM returns structured JSON (categories, confidence,
+   copy-pasteable commands). It does not run those commands.
+5. **Deliver** — redacted report to the channels you enabled.
+
+Install, start, and upgrade: **[docs/INSTALL.md](docs/INSTALL.md)**.
+
+---
+
+## Get it running
+
+The supported path is a **private copy** of this repo. `diag init` discovers
+your Prometheus / Loki / Alertmanager and scaffolds `client/`.
 
 ```bash
-./scripts/install-system-deps.sh   # OS packages (skip if Python >=3.11 already works)
-./scripts/bootstrap-venv.sh        # .venv from requirements.lock + `diag`
-source .venv/bin/activate
+./scripts/bootstrap-venv.sh && source .venv/bin/activate
 diag init
 cp client/agent/.env.example client/agent/.env   # fill secrets
 ./client/scripts/start.sh
+curl -sf http://127.0.0.1:8001/health
 ```
 
-Full lifecycle — private copy, dependency bootstrap, Docker-only init on Amazon
-Linux 2, wiring, upgrades, air gap, and throwaway `diag install` bundles:
-**[docs/INSTALL.md](docs/INSTALL.md)**.
-
-## Try it locally (hello-world workspace)
+Want to feel the loop before wiring a stack? The bundled example is enough:
 
 ```bash
 pip install -e ".[dev]"
-
-export AGENT_PROMETHEUS_URL=http://localhost:9090
-export AGENT_LOKI_URL=http://localhost:3100
-# LLM — pick one provider (see Configuration)
-export AGENT_CHAT_PROVIDER=ollama
-export AGENT_CHAT_MODEL=mistral:7b-instruct
-
 diag validate -w examples/hello-world
 diag serve -w examples/hello-world --port 8000
 ```
-
-Docker — mount your workspace at `/workspace` and every command finds it:
-
-```bash
-docker build -t diagnostic-agent:local .
-docker run --rm -p 8001:8000 \
-  -e AGENT_PROMETHEUS_URL=http://host.docker.internal:9090 \
-  -e AGENT_LOKI_URL=http://host.docker.internal:3100 \
-  -v "$PWD/examples/hello-world:/workspace:ro" \
-  diagnostic-agent:local
-
-# same image, no server: check a workspace in CI
-docker run --rm -v "$PWD/examples/hello-world:/workspace:ro" \
-  diagnostic-agent:local diag validate
-```
-
-POST a synthetic alert:
 
 ```bash
 curl -X POST http://localhost:8000/alert -H 'Content-Type: application/json' -d '{
@@ -104,261 +163,66 @@ curl -X POST http://localhost:8000/alert -H 'Content-Type: application/json' -d 
 }'
 ```
 
-## Host workspace
+Full lifecycle (mirror-clone, Amazon Linux, air gap, upgrades, throwaway
+bundles): **[docs/INSTALL.md](docs/INSTALL.md)**.
 
-A workspace is one directory in your repository holding everything specific to
-your stack. An `agent.yaml` manifest declares where each piece lives, so
-commands take no path arguments:
+---
 
-```
-infrastructure/diagnostic-agent/
-├── agent.yaml        # schema, pinned agent version, preset, paths
-├── profile/          # the integration profile (table below)
-├── runbooks/         # RAG corpus (markdown)
-├── scenarios.yaml    # runbook E2E scenarios
-└── blind_eval.yaml   # blind-eval dataset
-```
+## Join the project
 
-```yaml
-schema: 1
-agent_version: 0.1.0
-extends: spring-micrometer
-```
+This is an open Apache-2.0 project. The highest-leverage contribution is
+**making the agent smarter about a real failure mode** — not a framework rewrite.
 
-The profile directory supplies:
+To add a diagnostic capability, send **all three**:
 
-| File | Purpose |
-|---|---|
-| `service_map.yaml` | Topology / blast radius |
-| `metrics_profile.yaml` | PromQL templates (`{service}`, `{window}`) |
-| `logs_profile.yaml` | Loki label, level filter, alert line filters, optional module regex |
-| `redaction.yaml` | Ordered regex redaction rules |
-| `prompt_profile.yaml` | Platform description + tool-run hints |
+1. A runbook under [`runbooks/`](runbooks/) (start from
+   [`runbooks/_TEMPLATE-runbook.md`](runbooks/_TEMPLATE-runbook.md))
+2. A case in [`eval/blind_eval_dataset.yaml`](eval/blind_eval_dataset.yaml)
+   (synthetic logs + ground truth — no real PII)
+3. A scenario in `runbook_scenarios.yaml` (matching alert labels)
 
-Every key is optional — a directory following the conventional layout resolves
-identically, and tools skip checks whose inputs you have not supplied yet. See
-**[docs/WORKSPACE.md](docs/WORKSPACE.md)** for the full reference.
+CI lints the corpus on every PR **without LLM credentials**: schema, runbook ↔
+scenario pairing, grounding tokens, hypotheses-only wording. Optional model eval
+is maintainer-triggered.
 
-Config precedence: **env vars > workspace manifest > profile files > built-in presets**.
+Other ways in:
 
-Built-in presets (shipped in-package):
+- Improve a [preset](docs/WORKSPACE.md) or the Spring example under
+  [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/)
+- Tighten redaction, delivery, or the install generator
+- File a [bug](https://github.com/mskrado/diagnostic-agent/issues/new?template=bug_report.yml)
+  or a gap you hit on-call
 
-- `generic-prometheus` — community `http_requests_total` naming. Every preset
-  chain is rooted here, so a partial preset can never resolve a section to nothing.
-- `spring-micrometer` — Spring Boot Micrometer (`http_server_requests_seconds_*`, HikariCP, JVM)
+Read **[CONTRIBUTING.md](CONTRIBUTING.md)** and
+**[docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md)** (issue → `feature/<slug>-<n>` →
+`devel` → release). Every commit is DCO-signed (`git commit -s`).
 
-Presets carry naming conventions, not topology: `service_map.yaml` comes from
-your profile only.
-
-### Redaction is fail-closed
-
-`redaction.yaml` rules **accumulate** across an `extends:` chain — declare
-`extends: generic-prometheus` and your rules are appended to the base secret
-scrubbing. Reuse a parent rule's `name` to override it.
-
-The agent refuses to start when the resolved profile has zero redaction rules,
-so a mis-pointed workspace fails loudly instead of quietly emitting raw data.
-`diag validate` and `GET /health` both report the count. Set
-`AGENT_REQUIRE_REDACTION=false` to opt out deliberately.
-
-Reference examples:
-
-- [`examples/hello-world/`](examples/hello-world/) — minimal 3-tier app
-- [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) — Spring Boot modular monolith (Micrometer, tenant redaction, rich topology)
-
-See **[docs/INSTALL.md](docs/INSTALL.md)** to generate a workspace, or
-[docs/INTEGRATING.md](docs/INTEGRATING.md) to hand-write one.
-
-## Architecture
-
-```
-Prometheus alert ──▶ Alertmanager ──▶ POST /alert
-                                         │
-                                   LangGraph:
-                     detect → retrieve → rag_lookup → correlate → report
-                                                                    │
-                                                             should_route()
-                        ┌───────────────────────┬───────────────────┴────────┐
-                        ▼                       ▼                            ▼
-                     report                 escalate                     execute
-                        │                       │                            │
-                        │                       │                    execute_runbook
-                        │                       │                  (classifier → sandbox)
-                        └───────────────────────┴────────────┬───────────────┘
-                                                             │
-              audit JSONL + optional Slack / PagerDuty / email / Grafana annotation
+```bash
+python -m venv .venv && pip install -e ".[dev]"
+pytest -q
+diag lint
 ```
 
-Delivery runs after the graph completes, on every route. Which channels fire
-depends on the route: PagerDuty opens an incident on `escalate`, Slack and email
-post the reasoning trace whenever they are enabled.
+---
 
-### Deployment model: one agent per stack
-
-The agent is an **independent service** — it holds no knowledge of any
-application and reaches its data sources over plain HTTP. It is not, however, a
-multi-tenant service: **one running instance serves one stack.**
-
-That is deliberate. The profile, dependency map, redaction rules, RAG index, and
-LLM client are resolved once at startup from a single `AGENT_WORKSPACE` and
-cached for the process lifetime. Only the per-alert `service` label varies
-between requests.
+## Docs
 
 | | |
 |---|---|
-| **What you get** | Credentials, redaction rules, and the runbook index are scoped to one stack — a misconfigured workspace cannot leak another team's data or retrieve their runbooks |
-| **What it costs** | Several stacks means several instances, each with its own workspace, `.env`, and webhook URL |
-| **Serving many stacks from one process would need** | Per-alert profile routing, per-tenant RAG collections, per-stack credentials, and a tenant identity on the webhook — none of which exist today |
+| [docs/INSTALL.md](docs/INSTALL.md) | Install, upgrade, runtimes, throwaway bundles |
+| [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace files, presets, precedence |
+| [docs/INTEGRATING.md](docs/INTEGRATING.md) | Manual wiring if you skip the generator |
+| [docs/TESTING.md](docs/TESTING.md) · [TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Operator E2E and the ten test layers |
+| [runbooks/README.md](runbooks/README.md) | Authoring the RAG corpus |
+| [eval/README.md](eval/README.md) | Blind eval and routing replay |
+| [SECURITY.md](SECURITY.md) | Supported versions and reporting |
 
-Run one agent next to each observability stack, and give each its own workspace.
-See [docs/INSTALL.md](docs/INSTALL.md#run-the-agent-docker-image-or-standalone-process)
-for the runtime options.
+Architecture notes (routing, execution, threat model) live in
+[docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md).
+Every `AGENT_*` knob is listed in [`.env.example`](.env.example).
 
-### Routing (opt-in)
-
-Routing is off by default (`AGENT_ROUTING_ENABLED=false`), in which case
-`should_route` always returns `report` and the agent behaves exactly like the
-linear read-only pipeline. Once enabled:
-
-| Condition | Route |
-|---|---|
-| Severity normalizes to SEV1 or SEV2 | `escalate` |
-| `confidence_note: low` | `escalate` |
-| `confidence_note: high` **and** runbook context was retrieved | `execute` |
-| Anything else | `report` |
-
-Host severity strings normalize onto SEV1–SEV4 (`critical`/`p1`/`fatal` → SEV1,
-`warning`/`warn`/`medium` → SEV3, …); anything unrecognized becomes `UNKNOWN`
-and never escalates on severity alone. The decision is recorded as
-`route_decision` in the report and the audit record, so you can enable routing
-and observe the decisions before enabling execution.
-
-### Runbook execution (opt-in)
-
-The `execute` route reaches the `execute_runbook` node, which is fail-closed at
-every step:
-
-1. Select an executable runbook — one that declares a
-   [`runbook-actions` block](runbooks/README.md#executable-steps-runbook-actions)
-   matching the alert type, service, and confidence. Zero or multiple matches
-   escalate.
-2. Resolve the step's `action_id` in
-   [`execution_profile.yaml`](docs/WORKSPACE.md#execution_profileyaml-optional).
-   Presets ship **zero** actions, so an unconfigured host has nothing to run.
-3. Run the destructive-action classifier. A `hold` verdict escalates without
-   ever reaching the sandbox.
-4. Run the action through `Sandbox`, which refuses everything unless
-   `AGENT_EXEC_ENABLED=true` and executes argv arrays (never shell strings) in a
-   disposable container with no network, no mounts, dropped capabilities, a
-   read-only root filesystem, and a per-action timeout.
-
-Anything missing, ambiguous, denied, non-zero, or raised sets
-`outcome: escalated`, leaving the incident to a human. Command output is
-redacted at the sandbox boundary as soon as it leaves the container. Note that
-the report is finalized before this node runs, so the action and its result are
-currently visible only in graph state and the agent log — not in the audit
-record or the Slack / PagerDuty trace.
-
-With shipped defaults — execution disabled, no allowlisted actions, no
-`runbook-actions` blocks in the corpus — the branch can only escalate. Design,
-threat model, and current implementation status:
-**[docs/design/sandboxed-execution.md](docs/design/sandboxed-execution.md)**.
-Post-execution verification of recovery
-([#53](https://github.com/mskrado/diagnostic-agent/issues/53)) is not
-implemented yet, so the branch ends after the sandbox call.
-
-## Configuration
-
-All settings use the `AGENT_` prefix (see `.env.example`).
-
-| Variable | Default | Notes |
-|---|---|---|
-| `AGENT_WORKSPACE` | `/workspace` in the image | Host workspace directory |
-| `AGENT_PROFILE_DIR` | *(from workspace)* | Path to integration profile |
-| `AGENT_DEFAULT_PRESET` | `generic-prometheus` | Built-in preset for `extends:` chains |
-| `AGENT_REQUIRE_REDACTION` | `true` | Refuse to start with zero redaction rules |
-| `AGENT_PROMETHEUS_URL` | `http://prometheus:9090` | |
-| `AGENT_LOKI_URL` | `http://loki:3100` | |
-| `AGENT_CHAT_PROVIDER` / `AGENT_CHAT_MODEL` | ollama / mistral | Any LangChain provider |
-| `AGENT_EMBED_PROVIDER` / `AGENT_EMBED_MODEL` | ollama / nomic-embed-text | |
-| `AGENT_RAG_ENABLED` | `true` | |
-| `AGENT_SERVICE_MAP_PATH` | *(from profile)* | Override topology file |
-| `AGENT_RUNBOOKS_PATH` | *(from profile or `./runbooks`)* | Override RAG corpus |
-
-### Routing and execution
-
-Every switch here defaults to off, so enabling them is always a deliberate act.
-
-| Variable | Default | Notes |
-|---|---|---|
-| `AGENT_ROUTING_ENABLED` | `false` | Enable [severity routing](#routing-opt-in). Off means every alert takes the `report` route |
-| `AGENT_EXEC_ENABLED` | `false` | Master switch for [runbook execution](#runbook-execution-opt-in). Off makes the sandbox refuse every action |
-| `AGENT_EXEC_PROFILE_PATH` | *(from profile)* | Reported path of `execution_profile.yaml`. The allowlist itself is always read from the profile directory |
-| `AGENT_EXEC_DESTRUCTIVE_PATTERNS` | *(empty)* | Extra destructive verb patterns, comma-separated, merged with the built-in list |
-
-### Delivery
-
-| Variable | Default | Notes |
-|---|---|---|
-| `AGENT_AUDIT_LOG_DIR` | `<repo>/audit` | JSONL audit records, one per diagnosis |
-| `AGENT_GRAFANA_ANNOTATIONS_ENABLED` | `true` | Needs `AGENT_GRAFANA_TOKEN` |
-| `AGENT_EMAIL_ENABLED` | `true` | With `AGENT_EMAIL_TO` and the `AGENT_SMTP_*` settings |
-| `AGENT_EMAIL_ATTACH_AUDIT` | `true` | Attach redacted audit JSON (`llm_raw` + prompts) to each diagnostic email; set `false` for body-only |
-| `AGENT_EMAIL_ATTACH_AUDIT_MAX_BYTES` | `262144` | Skip the attachment (email still sends) when the redacted JSON exceeds this size |
-| `AGENT_SLACK_ENABLED` | `false` | Posts the reasoning trace; needs `AGENT_SLACK_WEBHOOK_URL`. Optional `AGENT_SLACK_CHANNEL`, `AGENT_SLACK_USERNAME` |
-| `AGENT_PAGERDUTY_ENABLED` | `false` | Needs `AGENT_PAGERDUTY_API_TOKEN` and `AGENT_PAGERDUTY_FROM_EMAIL`; `AGENT_PAGERDUTY_SERVICE_ID` to open incidents |
-
-PagerDuty opens an incident when the route is `escalate`. When the alert already
-carries an incident id and the diagnosis is high-confidence, it appends a note
-instead. All delivered text passes through the redaction rules.
-
-## Tools
-
-Every command runs against a workspace, so host projects use the published
-image rather than writing their own scripts.
-
-| Command | Purpose |
-|---|---|
-| `diag init` | Scaffold a client deployment under `client/` ([INSTALL.md](docs/INSTALL.md)) |
-| `diag upgrade` | Merge an upstream release into your client fork |
-| `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md#appendix-throwaway-bundles-diag-install)) |
-| `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
-| `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
-| `diag doctor` | Probe connectivity; `--check-fork` verifies no upstream-path drift |
-| `diag health-check` | Report the resolved workspace and profile health without a running server |
-| `diag e2e --url` | POST every scenario at a running agent and assert the report + redaction |
-| `diag eval blind` | Score LLM root-cause identification against the workspace dataset |
-| `diag replay` | Replay scenarios through the routing logic and score route decisions — no LLM, no stack ([eval/README.md](eval/README.md#routing-replay-eval-diag-replay)) |
-| `diag serve` | Run the `/alert` webhook server |
-
-Operator wrappers for host stacks (smoke, remote rule-path, runbook e2e) live
-under [`scripts/`](scripts/) — see [docs/TESTING.md](docs/TESTING.md).
-
-## Develop
-
-```bash
-python -m venv .venv
-.venv/Scripts/pip install -e ".[dev]"   # Windows
-# pip install -e ".[dev]"               # Unix
-pytest -q
-```
-
-`pyproject.toml` reads its dependency lists from `requirements.txt` (runtime) and
-`requirements-dev.txt` (tests), so `pip install -r` and `pip install .[dev]`
-cannot drift apart.
-
-This repository is itself a workspace — `runbooks/`, `runbook_scenarios.yaml`,
-and `eval/blind_eval_dataset.yaml` resolve through the same conventions a host
-uses — so CI exercises the host-facing commands rather than private test paths.
-See `eval/README.md` for the blind-eval workflow.
+---
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the shared lifecycle guide
-**[docs/SDLC_GUIDE.md](docs/SDLC_GUIDE.md)** (issue → `feature/<slug>-<n>` → `devel` →
-release). The preferred contribution is a **runbook + eval case + scenario** that
-CI can lint without LLM credentials.
+[Apache-2.0](LICENSE). Use it, fork it, ship it next to your stack.
