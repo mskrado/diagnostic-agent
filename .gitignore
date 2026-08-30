@@ -15,6 +15,9 @@ replay-results/
 # Locally generated `diag install` bundles
 deploy/
 deploy-*/
+# Staged `diag draft` output and `diag scan` bundles: both quote real log lines
+diag-draft/
+scan-evidence*.json
 # Client deployment secrets (scaffolded by diag init)
 client/agent/.env
 client/**/install-report.json

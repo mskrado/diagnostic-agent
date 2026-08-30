@@ -30,6 +30,11 @@ known answers so you can score the agent's diagnoses offline.
 Nothing here is code, and nothing here is secret — credentials and URLs live in
 the agent's `.env`, not in the workspace.
 
+You do not have to write the first version by hand. [`diag scan`](SCAN.md)
+reports what your stack already exposes, and [`diag draft`](DRAFT.md) turns that
+into these files, writing only the values it could confirm against your live
+Prometheus and Loki. Read this page to understand what you are reviewing.
+
 ## The shape of a workspace
 
 One directory, anywhere in your repository:

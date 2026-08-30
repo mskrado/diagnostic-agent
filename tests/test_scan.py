@@ -103,174 +103,8 @@ def test_extract_selector_services_prefers_labels_and_selector():
 
 
 # -- collect -----------------------------------------------------------------
-def _prometheus_payloads():
-    return {
-        "/api/v1/label/__name__/values": [
-            "up",
-            "http_server_requests_seconds_count",
-            "hikaricp_connections_pending",
-        ],
-        "/api/v1/status/buildinfo": {"version": "2.51.0"},
-        "/api/v1/labels": ["__name__", "job", "service"],
-        "/api/v1/label/service/values": ["api-gateway", "platform-service", "postgres"],
-        "/api/v1/label/job/values": ["platform-service", "prometheus"],
-        "/api/v1/targets": {
-            "activeTargets": [
-                {
-                    "health": "up",
-                    "labels": {
-                        "job": "platform-service",
-                        "instance": "platform-service:8080",
-                        "service": "platform-service",
-                    },
-                }
-            ]
-        },
-        "/api/v1/rules": {
-            "groups": [
-                {
-                    "name": "app",
-                    "rules": [
-                        {
-                            "type": "alerting",
-                            "name": "HighErrorRate",
-                            "query": 'rate(http_server_requests_seconds_count{status=~"5.."}[5m]) > 1',
-                            "duration": 300,
-                            "labels": {"severity": "critical"},
-                            "annotations": {"runbook": "runbook-high-error-rate.md"},
-                        }
-                    ],
-                }
-            ]
-        },
-    }
-
-
-class _StubResp:
-    def __init__(self, payload=None, text=""):
-        self._payload = payload
-        self.text = text
-        self.status_code = 200
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        if self._payload is None:
-            raise ValueError("not json")
-        return self._payload
-
-
-def _install_stack(monkeypatch, *, loki_lines=None, loki_labels=None):
-    """Fake a full Prometheus + Loki + Alertmanager stack over httpx.
-
-    Dispatch is prefix-first: Loki's ``/loki/api/v1/labels`` also ends with
-    Prometheus's ``/api/v1/labels``, so suffix matching alone would answer Loki
-    with Prometheus payloads.
-    """
-    prom = _prometheus_payloads()
-    loki_labels = loki_labels if loki_labels is not None else ["service", "level"]
-    loki_lines = loki_lines if loki_lines is not None else []
-
-    def handler(url, params=None):
-        if "/loki/api/v1/" not in url and "/api/v2/" not in url:
-            for path, payload in prom.items():
-                if url.endswith(path):
-                    return _StubResp({"data": payload})
-            raise AssertionError(f"unexpected prometheus url {url}")
-        if url.endswith("/loki/api/v1/labels"):
-            return _StubResp({"data": loki_labels})
-        if url.endswith("/loki/api/v1/label/service/values"):
-            return _StubResp({"data": ["api-gateway", "platform-service"]})
-        if url.endswith("/loki/api/v1/rules"):
-            return _StubResp(
-                text=(
-                    "ns:\n"
-                    "  - name: log-alerts\n"
-                    "    rules:\n"
-                    "      - alert: PostgresErrorsInLogs\n"
-                    '        expr: sum(count_over_time({service="platform-service"} '
-                    '|~ "(?i)(postgres|jdbc)" [5m])) > 0\n'
-                    "        labels:\n"
-                    "          severity: warning\n"
-                )
-            )
-        if url.endswith("/loki/api/v1/query_range"):
-            query = (params or {}).get("query", "")
-            if "|~" in query:
-                # Dependency-name probe: postgres errors land in the app stream.
-                return _StubResp(
-                    {
-                        "data": {
-                            "result": [
-                                {
-                                    "stream": {"service": "platform-service"},
-                                    "values": [["3", "jdbc connection refused"]],
-                                }
-                            ]
-                        }
-                    }
-                )
-            value = "platform-service" if "platform-service" in query else "api-gateway"
-            return _StubResp(
-                {
-                    "data": {
-                        "result": [
-                            {
-                                "stream": {"service": value},
-                                "values": [
-                                    [str(i + 1), line]
-                                    for i, line in enumerate(loki_lines)
-                                ],
-                            }
-                        ]
-                    }
-                }
-            )
-        if url.endswith("/api/v2/status"):
-            return _StubResp(
-                {
-                    "versionInfo": {"version": "0.27.0"},
-                    "config": {
-                        "original": "receivers:\n- slack_configs:\n"
-                        "  - api_url: https://hooks.slack.com/T00/B00/SUPERSECRET\n"
-                    },
-                }
-            )
-        if url.endswith("/api/v2/receivers"):
-            return _StubResp([{"name": "diagnostic-agent"}])
-        if url.endswith("/api/v2/alerts"):
-            return _StubResp([{"labels": {"alertname": "HighErrorRate"}}])
-        raise AssertionError(f"unexpected url {url} params={params}")
-
-    class _Client:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def get(self, url, params=None):
-            return handler(url, params)
-
-    monkeypatch.setattr(httpx, "Client", _Client)
-
-
-_JSON_LINE = json.dumps(
-    {
-        "@timestamp": "2026-08-30T10:00:00Z",
-        "level": "ERROR",
-        "logger_name": "com.example.platform.media.MediaService",
-        "message": "upload failed for ops@example.com tenant_id=tenant-9",
-    }
-)
-
-
-def test_collect_builds_evidence_from_live_stack(monkeypatch):
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE, "plain text line"])
+def test_collect_builds_evidence_from_live_stack(fake_stack, json_log_line):
+    fake_stack(loki_lines=[json_log_line, "plain text line"])
     options = ScanOptions(
         prometheus_url="http://prometheus:9090",
         loki_url="http://loki:3100",
@@ -310,8 +144,8 @@ def test_collect_builds_evidence_from_live_stack(monkeypatch):
     assert evidence.alertmanager.receivers == ("diagnostic-agent",)
 
 
-def test_collect_scrubs_sampled_lines(monkeypatch):
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE])
+def test_collect_scrubs_sampled_lines(fake_stack, json_log_line):
+    fake_stack(loki_lines=[json_log_line])
     evidence = collect_mod.collect_evidence(
         ScanOptions(
             prometheus_url="http://prometheus:9090",
@@ -327,8 +161,8 @@ def test_collect_scrubs_sampled_lines(monkeypatch):
     assert {hit.name for hit in evidence.loki.secrets} >= {"email"}
 
 
-def test_collect_omits_lines_unless_requested(monkeypatch):
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE])
+def test_collect_omits_lines_unless_requested(fake_stack, json_log_line):
+    fake_stack(loki_lines=[json_log_line])
     evidence = collect_mod.collect_evidence(
         ScanOptions(prometheus_url="http://prometheus:9090", loki_url="http://loki:3100")
     )
@@ -336,17 +170,17 @@ def test_collect_omits_lines_unless_requested(monkeypatch):
     assert evidence.loki.samples[0].line_count == 1
 
 
-def test_collect_discovers_log_service_redirect(monkeypatch):
+def test_collect_discovers_log_service_redirect(fake_stack, json_log_line):
     """postgres has metrics but no stream; its errors are in the app stream."""
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE])
+    fake_stack(loki_lines=[json_log_line])
     evidence = collect_mod.collect_evidence(
         ScanOptions(prometheus_url="http://prometheus:9090", loki_url="http://loki:3100")
     )
     assert evidence.loki.log_service_hints["postgres"] == ("platform-service",)
 
 
-def test_collect_skips_samples_when_disabled(monkeypatch):
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE])
+def test_collect_skips_samples_when_disabled(fake_stack, json_log_line):
+    fake_stack(loki_lines=[json_log_line])
     evidence = collect_mod.collect_evidence(
         ScanOptions(
             prometheus_url="http://prometheus:9090",
@@ -381,15 +215,15 @@ def test_collect_marks_prometheus_unreachable(monkeypatch):
     assert evidence.loki.reachable is False
 
 
-def test_collect_without_loki_url_notes_it(monkeypatch):
-    _install_stack(monkeypatch)
+def test_collect_without_loki_url_notes_it(fake_stack):
+    fake_stack()
     evidence = collect_mod.collect_evidence(ScanOptions(prometheus_url="http://prometheus:9090"))
     assert evidence.loki.notes == ("no Loki URL configured",)
     assert evidence.alertmanager.notes == ("no Alertmanager URL configured",)
 
 
-def test_evidence_serialises_to_json(monkeypatch):
-    _install_stack(monkeypatch, loki_lines=[_JSON_LINE])
+def test_evidence_serialises_to_json(fake_stack, json_log_line):
+    fake_stack(loki_lines=[json_log_line])
     evidence = collect_mod.collect_evidence(
         ScanOptions(
             prometheus_url="http://prometheus:9090",

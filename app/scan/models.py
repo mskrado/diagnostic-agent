@@ -14,6 +14,31 @@ from .scrub import SecretHit
 SCHEMA_VERSION = 1
 
 
+class BundleError(ValueError):
+    """A bundle cannot be read as evidence (wrong shape or newer schema)."""
+
+
+def _strs(data: dict, key: str) -> tuple[str, ...]:
+    value = data.get(key)
+    return tuple(str(v) for v in value) if isinstance(value, list) else ()
+
+
+def _str_map(data: dict, key: str) -> dict[str, tuple[str, ...]]:
+    value = data.get(key)
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(k): tuple(str(item) for item in v)
+        for k, v in value.items()
+        if isinstance(v, list)
+    }
+
+
+def _dicts(data: dict, key: str) -> tuple[dict, ...]:
+    value = data.get(key)
+    return tuple(v for v in value if isinstance(v, dict)) if isinstance(value, list) else ()
+
+
 @dataclass(frozen=True)
 class AlertRule:
     """One alerting rule, from either the Prometheus or the Loki ruler."""
@@ -42,6 +67,19 @@ class AlertRule:
             "services": list(self.services),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "AlertRule":
+        return cls(
+            name=str(data.get("name") or ""),
+            source=str(data.get("source") or ""),
+            severity=str(data.get("severity") or ""),
+            expr=str(data.get("expr") or ""),
+            duration=str(data.get("duration") or ""),
+            runbook=str(data.get("runbook") or ""),
+            line_filters=_strs(data, "line_filters"),
+            services=_strs(data, "services"),
+        )
+
 
 @dataclass(frozen=True)
 class ScrapeTarget:
@@ -59,6 +97,15 @@ class ScrapeTarget:
             "health": self.health,
             "service": self.service,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ScrapeTarget":
+        return cls(
+            job=str(data.get("job") or ""),
+            instance=str(data.get("instance") or ""),
+            health=str(data.get("health") or "unknown"),
+            service=str(data.get("service") or ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -90,6 +137,23 @@ class PrometheusEvidence:
             "notes": list(self.notes),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "PrometheusEvidence":
+        return cls(
+            reachable=bool(data.get("reachable")),
+            version=str(data.get("version") or ""),
+            url=str(data.get("url") or ""),
+            metric_count=int(data.get("metric_count") or 0),
+            metric_names=_strs(data, "metric_names"),
+            label_names=_strs(data, "label_names"),
+            label_values=_str_map(data, "label_values"),
+            targets=tuple(
+                ScrapeTarget.from_dict(t) for t in _dicts(data, "targets")
+            ),
+            rules=tuple(AlertRule.from_dict(r) for r in _dicts(data, "rules")),
+            notes=_strs(data, "notes"),
+        )
+
 
 @dataclass(frozen=True)
 class LogSample:
@@ -111,6 +175,17 @@ class LogSample:
             "level_values": list(self.level_values),
             "logger_names": list(self.logger_names),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LogSample":
+        return cls(
+            stream_value=str(data.get("stream_value") or ""),
+            line_count=int(data.get("line_count") or 0),
+            json_lines=int(data.get("json_lines") or 0),
+            lines=_strs(data, "lines"),
+            level_values=_strs(data, "level_values"),
+            logger_names=_strs(data, "logger_names"),
+        )
 
 
 @dataclass(frozen=True)
@@ -147,6 +222,30 @@ class LokiEvidence:
             "notes": list(self.notes),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "LokiEvidence":
+        return cls(
+            reachable=bool(data.get("reachable")),
+            url=str(data.get("url") or ""),
+            label_names=_strs(data, "label_names"),
+            label_values=_str_map(data, "label_values"),
+            service_label=str(data.get("service_label") or ""),
+            level_field=str(data.get("level_field") or ""),
+            samples=tuple(LogSample.from_dict(s) for s in _dicts(data, "samples")),
+            rules=tuple(AlertRule.from_dict(r) for r in _dicts(data, "rules")),
+            secrets=tuple(
+                SecretHit(
+                    name=str(s.get("name") or ""),
+                    description=str(s.get("description") or ""),
+                    lines=int(s.get("lines") or 0),
+                    matches=int(s.get("matches") or 0),
+                )
+                for s in _dicts(data, "secrets")
+            ),
+            log_service_hints=_str_map(data, "log_service_hints"),
+            notes=_strs(data, "notes"),
+        )
+
 
 @dataclass(frozen=True)
 class AlertmanagerEvidence:
@@ -166,6 +265,22 @@ class AlertmanagerEvidence:
             "firing": dict(self.firing),
             "notes": list(self.notes),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AlertmanagerEvidence":
+        firing = data.get("firing")
+        return cls(
+            reachable=bool(data.get("reachable")),
+            url=str(data.get("url") or ""),
+            version=str(data.get("version") or ""),
+            receivers=_strs(data, "receivers"),
+            firing=(
+                {str(k): int(v) for k, v in firing.items()}
+                if isinstance(firing, dict)
+                else {}
+            ),
+            notes=_strs(data, "notes"),
+        )
 
 
 @dataclass(frozen=True)
@@ -190,6 +305,16 @@ class ServiceCandidate:
             "log_services_hint": list(self.log_services_hint),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "ServiceCandidate":
+        return cls(
+            name=str(data.get("name") or ""),
+            has_metrics=bool(data.get("has_metrics")),
+            has_logs=bool(data.get("has_logs")),
+            kind_hints=_strs(data, "kind_hints"),
+            log_services_hint=_strs(data, "log_services_hint"),
+        )
+
 
 @dataclass(frozen=True)
 class NamingMarker:
@@ -204,6 +329,14 @@ class NamingMarker:
 
     def to_dict(self) -> dict:
         return {"metric": self.metric, "present": self.present, "means": self.means}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NamingMarker":
+        return cls(
+            metric=str(data.get("metric") or ""),
+            present=bool(data.get("present")),
+            means=str(data.get("means") or ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -225,6 +358,20 @@ class Findings:
             "covered_alerts": list(self.covered_alerts),
             "notes": list(self.notes),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Findings":
+        return cls(
+            services=tuple(
+                ServiceCandidate.from_dict(s) for s in _dicts(data, "services")
+            ),
+            naming_markers=tuple(
+                NamingMarker.from_dict(m) for m in _dicts(data, "naming_markers")
+            ),
+            uncovered_alerts=_strs(data, "uncovered_alerts"),
+            covered_alerts=_strs(data, "covered_alerts"),
+            notes=_strs(data, "notes"),
+        )
 
 
 @dataclass(frozen=True)
@@ -249,6 +396,32 @@ class ScanEvidence:
             "alertmanager": self.alertmanager.to_dict(),
             "findings": self.findings.to_dict(),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ScanEvidence":
+        """Rebuild evidence from a bundle written by an earlier scan."""
+        if not isinstance(data, dict):
+            raise BundleError("bundle is not a JSON object")
+        schema = data.get("schema")
+        if not isinstance(schema, int):
+            raise BundleError("bundle has no integer 'schema' field")
+        if schema > SCHEMA_VERSION:
+            raise BundleError(
+                f"bundle schema {schema} is newer than this agent supports "
+                f"({SCHEMA_VERSION}); re-run diag scan"
+            )
+        return cls(
+            generated_at=str(data.get("generated_at") or ""),
+            agent_version=str(data.get("agent_version") or "unknown"),
+            schema=schema,
+            workspace=str(data.get("workspace") or ""),
+            prometheus=PrometheusEvidence.from_dict(data.get("prometheus") or {}),
+            loki=LokiEvidence.from_dict(data.get("loki") or {}),
+            alertmanager=AlertmanagerEvidence.from_dict(
+                data.get("alertmanager") or {}
+            ),
+            findings=Findings.from_dict(data.get("findings") or {}),
+        )
 
     def all_rules(self) -> tuple[AlertRule, ...]:
         return self.prometheus.rules + self.loki.rules
