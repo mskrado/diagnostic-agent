@@ -400,6 +400,7 @@ image rather than writing their own scripts.
 | `diag init` | Scaffold a client deployment under `client/` ([INSTALL.md](docs/INSTALL.md)) |
 | `diag upgrade` | Merge an upstream release into your client fork |
 | `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md#appendix-throwaway-bundles-diag-install)) |
+| `diag scan` | Report what a live stack exposes — services, metric naming, alerts, log shape ([SCAN.md](docs/SCAN.md)) |
 | `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
 | `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
 | `diag doctor` | Probe connectivity; `--check-fork` verifies no upstream-path drift |
