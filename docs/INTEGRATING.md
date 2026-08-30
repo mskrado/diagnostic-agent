@@ -1,50 +1,29 @@
 # Integrating diagnostic-agent into your project
 
-**Preferred path:** hold a **client fork** of this repository and run `diag init`
-to scaffold `client/` (compose, workspace, start scripts). See
-**[CLIENT_FORK.md](CLIENT_FORK.md)**.
-
-This guide covers Alertmanager wiring, verification, and CI for any workspace
-layout (client fork or throwaway `diag install` bundle).
+> **Installing?** Go to **[INSTALL.md](INSTALL.md)**. It is the single install
+> and upgrade guide: private copy, `diag init`, start, wire, verify, upgrade.
+>
+> This page is the **manual** path — hand-written workspace and Alertmanager
+> wiring for hosts that do not use the generator, plus the CI guard that applies
+> to any workspace layout.
 
 ---
 
 ## Topics
 
-1. [Choose a distribution](#1-choose-a-distribution)
-2. [Create a workspace](#2-create-a-workspace)
-3. [Wire Alertmanager](#3-wire-alertmanager)
-4. [Docker Compose snippet](#4-docker-compose-snippet)
-5. [Standalone process (`diag serve`)](#5-standalone-process-diag-serve)
-6. [Verify](#6-verify)
-7. [Guard the workspace in CI](#7-guard-the-workspace-in-ci)
-8. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
-
-Prefer **[INSTALL.md](INSTALL.md)** when you want discovery to generate the
-bundle, including [remote deploy](INSTALL.md#deploy-the-install-bundle-to-a-remote-host)
-and [Docker vs standalone runtime](INSTALL.md#run-the-agent-docker-image-or-standalone-process).
-This page is the manual wiring path.
+1. [Create a workspace by hand](#1-create-a-workspace-by-hand)
+2. [Wire Alertmanager](#2-wire-alertmanager)
+3. [Docker Compose snippet](#3-docker-compose-snippet)
+4. [Standalone process (`diag serve`)](#4-standalone-process-diag-serve)
+5. [Verify](#5-verify)
+6. [Guard the workspace in CI](#6-guard-the-workspace-in-ci)
+7. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
 
 ---
 
-## 1. Choose a distribution
+## 1. Create a workspace by hand
 
-| Option | When to use |
-|---|---|
-| **Client fork** (`diag init`) | Production: private repo copy, self-build or pinned image, `diag upgrade` ([CLIENT_FORK.md](CLIENT_FORK.md)) |
-| **Docker image** (`ghcr.io/mskrado/diagnostic-agent`) | Online hosts pulling a published tag (`diag init --pull-image`) |
-| **pip package** (`pip install diagnostic-agent`) | Embed in a Python host or run `diag serve` |
-
-## 2. Create a workspace
-
-**Preferred:** run the installer so discovery fills endpoints and generates
-alert/Alertmanager wiring for you — see [INSTALL.md](INSTALL.md):
-
-```bash
-diag install --output ./deploy
-```
-
-**Manual:** copy `examples/hello-world/` into your repository and edit:
+Copy `examples/hello-world/` into your repository and edit:
 
 ```text
 infrastructure/diagnostic-agent/
@@ -157,7 +136,7 @@ agent code and cannot be overridden. For a full coding-agent checklist
 commands, forbidden inventions), see
 [`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md).
 
-## 3. Wire Alertmanager
+## 2. Wire Alertmanager
 
 ```yaml
 receivers:
@@ -171,7 +150,7 @@ route:
       receiver: diagnostic-agent
 ```
 
-## 4. Docker Compose snippet
+## 3. Docker Compose snippet
 
 ```yaml
 services:
@@ -197,7 +176,7 @@ needed — no profile or runbook paths to keep in sync.
 Full remote-copy and Compose / `docker run` recipes:
 [INSTALL.md — Run the agent](INSTALL.md#run-the-agent-docker-image-or-standalone-process).
 
-## 5. Standalone process (`diag serve`)
+## 4. Standalone process (`diag serve`)
 
 ```bash
 pip install diagnostic-agent
@@ -210,10 +189,10 @@ diag serve --host 0.0.0.0 --port 8000
 Use host-reachable Prometheus/Loki URLs (often `http://127.0.0.1:9090`), not
 Docker DNS names, unless this process shares the container network namespace.
 Point Alertmanager’s webhook at this host:port. See
-[INSTALL.md](INSTALL.md#c-standalone-process-pip--diag-serve) for systemd and
+[INSTALL.md](INSTALL.md#c-standalone-process-diag-serve) for systemd and
 writable audit/Chroma paths.
 
-## 6. Verify
+## 5. Verify
 
 ```bash
 curl http://localhost:8001/health
@@ -234,7 +213,7 @@ docker compose exec diagnostic-agent diag e2e --url http://localhost:8000
 For full operator smoke / remote rule-path / runbook wrappers (and what stays
 host-owned vs agent-owned), see **[TESTING.md](TESTING.md)**.
 
-## 7. Guard the workspace in CI
+## 6. Guard the workspace in CI
 
 Neither check needs LLM credentials or a running stack, so both belong on every
 pull request that touches the workspace:

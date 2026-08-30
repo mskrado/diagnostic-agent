@@ -40,7 +40,7 @@ Next (AL2 has no Python >=3.11 in yum):
   pyenv local 3.12
   ./scripts/bootstrap-venv.sh
 
-Or skip host Python and run init via Docker (see docs/CLIENT_FORK.md).
+Or skip host Python and run init via Docker (see docs/INSTALL.md).
 EOF
     ;;
   amzn-2023)

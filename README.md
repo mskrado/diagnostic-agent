@@ -11,21 +11,17 @@ a pluggable LLM, and emits a structured diagnostic report.
 and runs only pre-approved, allowlisted actions in a locked-down sandbox. It is
 off unless a host deliberately turns it on.
 
-Integrating means holding a **client fork** of this repository: upstream product
+Deploying means holding a **client fork** of this repository: upstream product
 code plus your deployment under `client/`. Run `diag init` to scaffold compose,
-workspace, and start scripts; pull updates with `diag upgrade`.
-See **[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**.
-
-For throwaway bundles or CI-only workspaces without a fork, use `diag install`
-or mount an example workspace — see [docs/INTEGRATING.md](docs/INTEGRATING.md).
+workspace, and start scripts; pull updates with `diag upgrade`. The single
+install and upgrade guide is **[docs/INSTALL.md](docs/INSTALL.md)**.
 
 ## Contents
 
 Topics in this README:
 
-- [Quick start — client fork](#quick-start--client-fork) — `diag init` scaffolds `client/` in your private repo copy
-- [Quick start — install bundle](#quick-start--install-bundle-throwaway) — generate a throwaway bundle with `diag install`
-- [Quick start (hello-world workspace)](#quick-start-hello-world-workspace) — run the agent locally or in Docker against the bundled example
+- [Quick start](#quick-start) — `diag init` scaffolds `client/` in your private repo copy
+- [Try it locally (hello-world workspace)](#try-it-locally-hello-world-workspace) — run the agent against the bundled example
 - [Host workspace](#host-workspace) — manifest, profile files, preset chain, [fail-closed redaction](#redaction-is-fail-closed)
 - [Architecture](#architecture) — alert → LangGraph pipeline → route → report, plus [routing](#routing-opt-in) and [runbook execution](#runbook-execution-opt-in)
 - [Configuration](#configuration) — every `AGENT_` environment variable
@@ -37,11 +33,9 @@ Additional documentation:
 
 | Document | Covers |
 |---|---|
-| [docs/CLIENT_FORK.md](docs/CLIENT_FORK.md) | **Client fork model**: private repo copy, `diag init`, start scripts, `diag upgrade`, offline packs |
-| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Python + OS dependency layout, `requirements.lock`, host bootstrap scripts |
-| [docs/INSTALL.md](docs/INSTALL.md) | **Default install = client fork** (`diag init`): shared discovery/flags with `diag install`, obtaining `diag` via host venv or one-shot Docker, throwaway bundles, remote deploy, Docker vs standalone `diag serve` |
+| [docs/INSTALL.md](docs/INSTALL.md) | **The install guide**: private copy, dependencies and `diag` bootstrap, `diag init`, start, wire, verify, `diag upgrade`, air gap, runtimes, throwaway bundles, troubleshooting |
 | [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace reference: discovery order, `agent.yaml` keys, flat layout, precedence, CI validation |
-| [docs/INTEGRATING.md](docs/INTEGRATING.md) | Onboarding a host project: distribution choice, Alertmanager wiring, Compose snippet, verification, CI guard |
+| [docs/INTEGRATING.md](docs/INTEGRATING.md) | Manual wiring without the generator: hand-written workspace, Alertmanager, Compose snippet, CI guard |
 | [docs/TESTING_STRATEGY.md](docs/TESTING_STRATEGY.md) | Testing strategy: the ten test layers, configuration matrix, gates, and how to run checks against a production agent |
 | [docs/TESTING.md](docs/TESTING.md) | Operator E2E: smoke-test, remote rule-path, runbook-e2e wrappers; host vs agent ownership |
 | [runbooks/README.md](runbooks/README.md) | RAG corpus: chunking and retrieval behaviour, file layout, runbook authoring rules |
@@ -52,7 +46,7 @@ Additional documentation:
 | [CONTRIBUTING.md](CONTRIBUTING.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How to propose changes and the community expectations |
 | [`examples/hello-world/`](examples/hello-world/) · [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) | Reference workspaces to copy and adapt |
 
-## Quick start — client fork
+## Quick start
 
 Mirror-clone this repo into your organization, then on the deployment host:
 
@@ -65,24 +59,11 @@ cp client/agent/.env.example client/agent/.env   # fill secrets
 ./client/scripts/start.sh
 ```
 
-Full lifecycle (private copy, upgrades, air gap, Docker-only init on Amazon Linux 2):
-**[docs/CLIENT_FORK.md](docs/CLIENT_FORK.md)**. Dependency files and lock policy:
-**[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)**.
+Full lifecycle — private copy, dependency bootstrap, Docker-only init on Amazon
+Linux 2, wiring, upgrades, air gap, and throwaway `diag install` bundles:
+**[docs/INSTALL.md](docs/INSTALL.md)**.
 
-## Quick start — install bundle (throwaway)
-
-Discover running observability tools and generate a complete agent + wiring
-bundle **without** a client fork. Prefer the [client fork](#quick-start--client-fork)
-for production. Flag/parameter reference (shared with `diag init`):  
-**[docs/INSTALL.md](docs/INSTALL.md)**
-
-```bash
-pip install -e ".[dev]"
-diag install --output ./deploy
-# then follow ./deploy/APPLY.md
-```
-
-## Quick start (hello-world workspace)
+## Try it locally (hello-world workspace)
 
 ```bash
 pip install -e ".[dev]"
@@ -185,7 +166,8 @@ Reference examples:
 - [`examples/hello-world/`](examples/hello-world/) — minimal 3-tier app
 - [`examples/spring-modular-monolith/`](examples/spring-modular-monolith/) — Spring Boot modular monolith (Micrometer, tenant redaction, rich topology)
 
-See **[docs/INTEGRATING.md](docs/INTEGRATING.md)** for a complete onboarding guide.
+See **[docs/INSTALL.md](docs/INSTALL.md)** to generate a workspace, or
+[docs/INTEGRATING.md](docs/INTEGRATING.md) to hand-write one.
 
 ## Architecture
 
@@ -337,9 +319,9 @@ image rather than writing their own scripts.
 
 | Command | Purpose |
 |---|---|
-| `diag init` | Scaffold a client deployment under `client/` ([CLIENT_FORK.md](docs/CLIENT_FORK.md)) |
+| `diag init` | Scaffold a client deployment under `client/` ([INSTALL.md](docs/INSTALL.md)) |
 | `diag upgrade` | Merge an upstream release into your client fork |
-| `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md)) |
+| `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md#appendix-throwaway-bundles-diag-install)) |
 | `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
 | `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
 | `diag doctor` | Probe connectivity; `--check-fork` verifies no upstream-path drift |

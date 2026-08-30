@@ -345,7 +345,7 @@ networks:
 # CONFIGURE
 #   - Pin DIAGNOSTIC_AGENT_IMAGE in .env (pull mode) or rebuild (build mode).
 #   - Edit ../workspace (client layout) or ./workspace for service_map / runbooks.
-#   Full reference: docs/CLIENT_FORK.md and docs/WORKSPACE.md
+#   Full reference: docs/INSTALL.md and docs/WORKSPACE.md
 #
 name: {project_name}
 services:

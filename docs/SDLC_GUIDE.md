@@ -1,6 +1,6 @@
 # diagnostic-agent SDLC Guide
 
-End-to-end software development lifecycle for **diagnostic-agent** — pytest / corpus lint, GHCR image, optional PyPI, and the **client fork** deployment model ([docs/CLIENT_FORK.md](CLIENT_FORK.md)).
+End-to-end software development lifecycle for **diagnostic-agent** — pytest / corpus lint, GHCR image, optional PyPI, and the **client fork** deployment model ([docs/INSTALL.md](INSTALL.md)).
 
 **Upstream** owns agent source, presets, and the default runbook corpus. **Clients** own everything under `client/` in their private fork.
 
@@ -48,7 +48,7 @@ Topics:
 | Concern | Where it lives |
 |---------|----------------|
 | Agent runtime, tools, presets, default corpus | This repo (`mskrado/diagnostic-agent`) |
-| Host topology, redaction, runbooks, scenarios, compose | **Client fork** `client/` (see `docs/CLIENT_FORK.md`) |
+| Host topology, redaction, runbooks, scenarios, compose | **Client fork** `client/` (see `docs/INSTALL.md`) |
 | Install / discover wiring | `diag init` (client) or `diag install` (throwaway bundle) |
 
 ---
