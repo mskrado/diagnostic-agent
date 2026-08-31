@@ -19,7 +19,8 @@ cp client/agent/.env.example client/agent/.env    # fill secrets
 
 Related docs: [WORKSPACE.md](WORKSPACE.md) (workspace file reference) ·
 [INTEGRATING.md](INTEGRATING.md) (manual wiring without the generator) ·
-[TESTING.md](TESTING.md) (operator smoke tests)
+[SCAN.md](SCAN.md) / [DRAFT.md](DRAFT.md) / [DRIFT.md](DRIFT.md)
+(evidence → draft → gate) · [TESTING.md](TESTING.md) (operator smoke tests)
 
 ---
 
@@ -234,13 +235,44 @@ details for both paths:
 
 ## 5. Customize your workspace
 
-1. **`client/workspace/service_map.yaml`** — your topology (required for blast radius).
-2. **`client/workspace/runbooks/`** — replace the reference corpus with your own.
+`diag init` seeds a starter workspace from discovery. Prefer filling it from
+**live evidence** rather than guessing YAML by hand:
+
+### Scan → draft → review
+
+```bash
+# 1) See what Prometheus / Loki / Alertmanager already expose
+diag scan -w client/workspace --out ./scan-evidence.json \
+  --alertmanager-url http://alertmanager:9093
+
+# 2) Stage a draft next to the workspace (does not overwrite client/workspace)
+diag draft -w client/workspace --bundle ./scan-evidence.json --out ./diag-draft
+diag validate -w ./diag-draft && diag lint -w ./diag-draft
+
+# 3) Diff, merge what you want into client/workspace/, then delete the staging dir
+```
+
+| Step | Command | What it does |
+|---|---|---|
+| **Scan** | [`diag scan`](SCAN.md) | Read-only report + optional JSON bundle |
+| **Draft** | [`diag draft`](DRAFT.md) | Writes only values the stack confirms (optional `--llm` for prompt/runbook drafts) |
+| **Drift** | [`diag drift`](DRIFT.md) | Later: fail CI when the workspace no longer matches the stack |
+
+Nothing lands in `client/workspace/` unless you pass `diag draft --in-place`
+(and `--force` to clobber). Default is a staging directory you review.
+
+### Still edit by hand
+
+After the draft (or instead of it), touch the files that need human judgment:
+
+1. **`client/workspace/service_map.yaml`** — topology (required for blast radius).
+2. **`client/workspace/runbooks/`** — replace reference corpus with your own.
 3. **`client/workspace/prompt_profile.yaml`** — platform naming, golden commands
    ([playbook](PROMPT_PROFILE_AUTHORING.md)).
 4. **`client/agent/.env`** — LLM provider, URLs, SMTP (never commit).
 
-File-by-file reference for every workspace YAML: [WORKSPACE.md](WORKSPACE.md).
+File-by-file reference: [WORKSPACE.md](WORKSPACE.md). Manual-only path (no
+generator): [INTEGRATING.md](INTEGRATING.md).
 
 ---
 
@@ -286,6 +318,20 @@ docker run --rm -v "$PWD/client/workspace:/workspace:ro" \
   ghcr.io/mskrado/diagnostic-agent:latest \
   sh -c "diag validate && diag lint"
 ```
+
+Workspace vs stack (needs Prometheus/Loki, or a saved scan bundle):
+
+```bash
+# Live
+diag drift -w client/workspace
+
+# CI / air-gap — commit or upload a scan bundle, then:
+diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle
+```
+
+`diag init` scaffolds an optional drift step in
+`client/.github/workflows/client-validate.yml` when the repo variable
+`DRIFT_BUNDLE` is set. Details: [DRIFT.md](DRIFT.md).
 
 Blind eval — note `-w` belongs on `eval`, before `blind`:
 
@@ -544,11 +590,13 @@ verify OK
 
 Next steps
 ----------
-  1. Review   client/workspace/service_map.yaml
-  2. Copy     client/agent/.env.example -> client/agent/.env
-  3. Start    ./client/scripts/start.sh
-  4. Health   curl -sf http://127.0.0.1:8001/health
-  5. Wire     merge client/observability into your live stack
+  1. Scan     diag scan -w client/workspace --out ./scan-evidence.json
+  2. Draft    diag draft -w client/workspace --bundle ./scan-evidence.json
+  3. Review   merge ./diag-draft into client/workspace/
+  4. Copy     client/agent/.env.example -> client/agent/.env
+  5. Start    ./client/scripts/start.sh
+  6. Health   curl -sf http://127.0.0.1:8001/health
+  7. Wire     merge client/observability into your live stack
 ```
 
 ### Remote discovery
@@ -1185,17 +1233,24 @@ cp client/agent/.env.example client/agent/.env
 ./client/scripts/start.sh
 curl -sf http://127.0.0.1:8001/health
 
-# 2) Non-interactive / CI
+# 2) Fill the workspace from live evidence
+diag scan -w client/workspace --out ./scan-evidence.json
+diag draft -w client/workspace --bundle ./scan-evidence.json --out ./diag-draft
+# review ./diag-draft, merge into client/workspace/, then:
+diag validate -w client/workspace && diag lint -w client/workspace
+diag drift -w client/workspace   # or --bundle ./scan-evidence.json --no-oracle
+
+# 3) Non-interactive / CI
 diag init --non-interactive --yes \
   --prometheus-url http://prometheus:9090 \
   --loki-url http://loki:3100 \
   --preset generic-prometheus \
   --chat-provider ollama
 
-# 3) Upgrade
+# 4) Upgrade
 diag doctor --check-fork
 git fetch upstream --tags && diag upgrade --target v1.2.0 && ./client/scripts/start.sh
 
-# 4) Throwaway bundle (appendix; no fork lifecycle)
+# 5) Throwaway bundle (appendix; no fork lifecycle)
 diag install --output ./deploy && cat ./deploy/APPLY.md
 ```
