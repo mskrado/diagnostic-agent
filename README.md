@@ -400,6 +400,10 @@ image rather than writing their own scripts.
 | `diag init` | Scaffold a client deployment under `client/` ([INSTALL.md](docs/INSTALL.md)) |
 | `diag upgrade` | Merge an upstream release into your client fork |
 | `diag install` | Discover a stack and generate a throwaway bundle ([INSTALL.md](docs/INSTALL.md#appendix-throwaway-bundles-diag-install)) |
+| `diag scan` | Report what a live stack exposes — services, metric naming, alerts, log shape ([SCAN.md](docs/SCAN.md)) |
+| `diag draft` | Draft workspace files from that evidence, writing only what the stack confirms ([DRAFT.md](docs/DRAFT.md)) |
+| `diag mine-eval` | Draft blind-eval cases from redacted audit logs ([DRAFT.md](docs/DRAFT.md#diag-mine-eval--blind-eval-cases-from-audits)) |
+| `diag drift` | Gate workspace drift against a live stack or scan bundle ([DRIFT.md](docs/DRIFT.md)) |
 | `diag validate` | Manifest schema, profile resolution, redaction rule count, topology parse |
 | `diag lint` | Corpus lint: runbook/scenario coverage, blind-eval grounding, hypotheses-only framing |
 | `diag doctor` | Probe connectivity; `--check-fork` verifies no upstream-path drift |

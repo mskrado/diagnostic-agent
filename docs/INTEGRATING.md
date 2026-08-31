@@ -3,25 +3,58 @@
 > **Installing?** Go to **[INSTALL.md](INSTALL.md)**. It is the single install
 > and upgrade guide: private copy, `diag init`, start, wire, verify, upgrade.
 >
-> This page is the **manual** path — hand-written workspace and Alertmanager
-> wiring for hosts that do not use the generator, plus the CI guard that applies
-> to any workspace layout.
+> This page is the **manual** path — workspace and Alertmanager wiring for hosts
+> that do not use the generator, plus the CI guard that applies to any layout.
+> Prefer [`diag scan`](SCAN.md) → [`diag draft`](DRAFT.md) to bootstrap the
+> YAML, then keep [`diag drift`](DRIFT.md) in CI so coverage stays honest.
 
 ---
 
 ## Topics
 
-1. [Create a workspace by hand](#1-create-a-workspace-by-hand)
-2. [Wire Alertmanager](#2-wire-alertmanager)
-3. [Docker Compose snippet](#3-docker-compose-snippet)
-4. [Standalone process (`diag serve`)](#4-standalone-process-diag-serve)
-5. [Verify](#5-verify)
-6. [Guard the workspace in CI](#6-guard-the-workspace-in-ci)
-7. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
+1. [Bootstrap from live evidence](#1-bootstrap-from-live-evidence)
+2. [Create a workspace by hand](#2-create-a-workspace-by-hand)
+3. [Wire Alertmanager](#3-wire-alertmanager)
+4. [Docker Compose snippet](#4-docker-compose-snippet)
+5. [Standalone process (`diag serve`)](#5-standalone-process-diag-serve)
+6. [Verify](#6-verify)
+7. [Guard the workspace in CI](#7-guard-the-workspace-in-ci)
+8. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
 
 ---
 
-## 1. Create a workspace by hand
+## 1. Bootstrap from live evidence
+
+If Prometheus and Loki are reachable, do not invent the first `service_map` /
+profiles from memory. Point `diag` at the stack, stage a draft, then edit:
+
+```bash
+# From a checkout that has the diag CLI (or via the published image)
+export AGENT_PROMETHEUS_URL=http://prometheus:9090
+export AGENT_LOKI_URL=http://loki:3100
+
+diag scan -w infrastructure/diagnostic-agent --out ./scan-evidence.json \
+  --alertmanager-url http://alertmanager:9093
+
+diag draft -w infrastructure/diagnostic-agent \
+  --bundle ./scan-evidence.json --out ./diag-draft
+
+diag validate -w ./diag-draft && diag lint -w ./diag-draft
+# Diff ./diag-draft into infrastructure/diagnostic-agent/, commit what you keep
+```
+
+| Command | Role |
+|---|---|
+| [`diag scan`](SCAN.md) | Read-only evidence (services, naming, alerts, log shape) |
+| [`diag draft`](DRAFT.md) | Verified workspace files (optional `--llm` for prompt/runbook drafts) |
+| [`diag drift`](DRIFT.md) | Ongoing gate: workspace still matches the stack |
+
+Full install-path recipe (client fork): [INSTALL.md §5](INSTALL.md#5-customize-your-workspace).
+When you cannot reach the stack yet, copy an example and edit by hand below.
+
+---
+
+## 2. Create a workspace by hand
 
 Copy `examples/hello-world/` into your repository and edit:
 
@@ -136,7 +169,7 @@ agent code and cannot be overridden. For a full coding-agent checklist
 commands, forbidden inventions), see
 [`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md).
 
-## 2. Wire Alertmanager
+## 3. Wire Alertmanager
 
 ```yaml
 receivers:
@@ -150,7 +183,7 @@ route:
       receiver: diagnostic-agent
 ```
 
-## 3. Docker Compose snippet
+## 4. Docker Compose snippet
 
 ```yaml
 services:
@@ -176,7 +209,7 @@ needed — no profile or runbook paths to keep in sync.
 Full remote-copy and Compose / `docker run` recipes:
 [INSTALL.md — Run the agent](INSTALL.md#run-the-agent-docker-image-or-standalone-process).
 
-## 4. Standalone process (`diag serve`)
+## 5. Standalone process (`diag serve`)
 
 ```bash
 pip install diagnostic-agent
@@ -192,7 +225,7 @@ Point Alertmanager’s webhook at this host:port. See
 [INSTALL.md](INSTALL.md#c-standalone-process-diag-serve) for systemd and
 writable audit/Chroma paths.
 
-## 5. Verify
+## 6. Verify
 
 ```bash
 curl http://localhost:8001/health
@@ -213,10 +246,10 @@ docker compose exec diagnostic-agent diag e2e --url http://localhost:8000
 For full operator smoke / remote rule-path / runbook wrappers (and what stays
 host-owned vs agent-owned), see **[TESTING.md](TESTING.md)**.
 
-## 6. Guard the workspace in CI
+## 7. Guard the workspace in CI
 
-Neither check needs LLM credentials or a running stack, so both belong on every
-pull request that touches the workspace:
+Neither `validate` nor `lint` needs LLM credentials or a running stack, so both
+belong on every pull request that touches the workspace:
 
 ```bash
 docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
@@ -228,6 +261,24 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
 rule count, topology parse). `lint` checks content (every runbook has a scenario
 and vice versa, blind-eval tokens appear in their logs, runbooks keep the
 hypotheses-only framing).
+
+Optionally gate **coverage vs the live stack** with [`diag drift`](DRIFT.md).
+On a runner that can reach Prometheus:
+
+```bash
+diag drift -w infrastructure/diagnostic-agent
+```
+
+In air-gapped / GitHub-hosted CI, refresh a scan bundle on a schedule and pass
+it in:
+
+```bash
+diag drift -w infrastructure/diagnostic-agent \
+  --bundle ./scan-evidence.json --no-oracle
+```
+
+Client forks from `diag init` already get an optional `DRIFT_BUNDLE` step in
+`client-validate.yml` — see [DRIFT.md](DRIFT.md#client-ci-hook).
 
 ## Reference: Spring Boot modular monolith
 

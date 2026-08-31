@@ -30,6 +30,11 @@ known answers so you can score the agent's diagnoses offline.
 Nothing here is code, and nothing here is secret — credentials and URLs live in
 the agent's `.env`, not in the workspace.
 
+You do not have to write the first version by hand. Prefer the evidence loop
+([`diag scan`](SCAN.md) → [`diag draft`](DRAFT.md) → review →
+[`diag drift`](DRIFT.md)) — see [Authoring workflow](#authoring-workflow-scan--draft--drift).
+Read this page to understand what you are reviewing and what each file is for.
+
 ## The shape of a workspace
 
 One directory, anywhere in your repository:
@@ -68,13 +73,14 @@ plain three-tier app, and each file is only a few lines long.
 
 ## Topics
 
-1. [What each file is for](#what-each-file-is-for)
-2. [The smallest workspace that works](#the-smallest-workspace-that-works)
-3. [Locating the workspace](#locating-the-workspace)
-4. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
-5. [Manifest (`agent.yaml`)](#manifest-agentyaml)
-6. [Flat layout](#flat-layout)
-7. [File-by-file reference](#file-by-file-reference)
+1. [Authoring workflow: scan → draft → drift](#authoring-workflow-scan--draft--drift)
+2. [What each file is for](#what-each-file-is-for)
+3. [The smallest workspace that works](#the-smallest-workspace-that-works)
+4. [Locating the workspace](#locating-the-workspace)
+5. [How the agent uses the workspace](#how-the-agent-uses-the-workspace)
+6. [Manifest (`agent.yaml`)](#manifest-agentyaml)
+7. [Flat layout](#flat-layout)
+8. [File-by-file reference](#file-by-file-reference)
    - [`metrics_profile.yaml`](#metrics_profileyaml)
    - [`logs_profile.yaml`](#logs_profileyaml)
    - [`prompt_profile.yaml`](#prompt_profileyaml)
@@ -84,12 +90,34 @@ plain three-tier app, and each file is only a few lines long.
    - [`scenarios.yaml`](#scenariosyaml)
    - [`blind_eval.yaml`](#blind_evalyaml-optional)
    - [`runbooks/`](#runbooks)
-8. [When the workspace is wrong](#when-the-workspace-is-wrong)
-9. [Precedence](#precedence)
-10. [Redaction is fail-closed](#redaction-is-fail-closed)
-11. [Validating in CI](#validating-in-ci)
+9. [When the workspace is wrong](#when-the-workspace-is-wrong)
+10. [Precedence](#precedence)
+11. [Redaction is fail-closed](#redaction-is-fail-closed)
+12. [Validating in CI](#validating-in-ci)
 
 ---
+
+## Authoring workflow: scan → draft → drift
+
+| Step | Command | Writes files? | When |
+|---|---|---|---|
+| **Scan** | [`diag scan`](SCAN.md) | Optional JSON bundle only | Before authoring, and whenever you want a fresh picture of the stack |
+| **Draft** | [`diag draft`](DRAFT.md) | Staging dir by default (`./diag-draft`) | Once you have evidence; optional `--llm` for prompt/runbook drafts |
+| **Review** | `diag validate` / `diag lint` + human diff | Only what you merge | Before committing workspace changes |
+| **Drift** | [`diag drift`](DRIFT.md) | No (gate only) | CI and scheduled checks after the workspace is in production |
+
+```bash
+diag scan -w infrastructure/diagnostic-agent --out ./scan-evidence.json
+diag draft -w infrastructure/diagnostic-agent \
+  --bundle ./scan-evidence.json --out ./diag-draft
+diag validate -w ./diag-draft && diag lint -w ./diag-draft
+# merge ./diag-draft into the workspace, then keep it honest:
+diag drift -w infrastructure/diagnostic-agent
+```
+
+Install path (client fork under `client/workspace/`):
+[INSTALL.md §5](INSTALL.md#5-customize-your-workspace). Manual-only bootstrap:
+[INTEGRATING.md](INTEGRATING.md).
 
 ## What each file is for
 
@@ -722,3 +750,13 @@ docker run --rm -v "$PWD/infrastructure/diagnostic-agent:/workspace:ro" \
 
 `validate` covers configuration; `lint` covers content. Neither needs LLM
 credentials or a running stack. Add `diag e2e --url` once an agent is deployed.
+
+To fail when the workspace no longer matches Prometheus/Loki (new services,
+dark map nodes, uncovered alerts, dead templates), add [`diag drift`](DRIFT.md):
+
+```bash
+diag drift -w infrastructure/diagnostic-agent
+# or, with a committed/CI-produced scan bundle:
+diag drift -w infrastructure/diagnostic-agent \
+  --bundle ./scan-evidence.json --no-oracle
+```
