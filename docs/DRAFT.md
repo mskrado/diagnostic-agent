@@ -268,6 +268,7 @@ name so it cannot silently replace a curated `blind_eval.yaml`.
 ## Related
 
 - [SCAN.md](SCAN.md) — the evidence `diag draft` consumes
+- [DRIFT.md](DRIFT.md) — gating a workspace against fresh evidence
 - [WORKSPACE.md](WORKSPACE.md) — what each workspace file is for
 - [PROMPT_PROFILE_AUTHORING.md](PROMPT_PROFILE_AUTHORING.md) — playbook the `--llm` prompt follows
 - [INSTALL.md](INSTALL.md) — `diag install` / `diag init` scaffolding

@@ -167,6 +167,12 @@ jobs:
         run: |
           diag validate -w client/workspace
           diag lint -w client/workspace
+      - name: Drift check (optional)
+        if: ${{ vars.DRIFT_BUNDLE != '' }}
+        run: >
+          diag drift -w client/workspace
+          --bundle "${{ vars.DRIFT_BUNDLE }}"
+          --no-oracle
 """
 
 

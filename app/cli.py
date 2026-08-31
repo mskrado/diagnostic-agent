@@ -466,6 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .draft.cli import add_draft_parser
     from .scan.cli import add_scan_parser
     from .mine_eval_cli import add_mine_eval_parser
+    from .drift.cli import add_drift_parser
 
     add_install_parser(sub)
     add_init_parser(sub)
@@ -473,6 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_scan_parser(sub)
     add_draft_parser(sub)
     add_mine_eval_parser(sub)
+    add_drift_parser(sub)
 
     return parser
 

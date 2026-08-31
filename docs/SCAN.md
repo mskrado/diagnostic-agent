@@ -160,6 +160,7 @@ job of [`diag draft`](DRAFT.md).
 ## Related
 
 - [DRAFT.md](DRAFT.md) — turning this evidence into workspace files
+- [DRIFT.md](DRIFT.md) — gating a workspace against fresh evidence
 - [WORKSPACE.md](WORKSPACE.md) — what each workspace file is for
 - [INSTALL.md](INSTALL.md) — `diag install` / `diag init` scaffolding
 - [PROMPT_PROFILE_AUTHORING.md](PROMPT_PROFILE_AUTHORING.md) — writing the prompt profile
