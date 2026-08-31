@@ -171,6 +171,7 @@ def _fuzzy_match(
 
 def _slug(name: str) -> str:
     spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", name)
+    spaced = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "-", spaced)
     return re.sub(r"[^a-z0-9]+", "-", spaced.lower()).strip("-") or "alert"
 
 

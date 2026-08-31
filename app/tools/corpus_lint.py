@@ -66,6 +66,13 @@ _AUTO_REMEDIATE = re.compile(
     re.IGNORECASE,
 )
 
+# Must match app.draft.runbook_llm.DRAFT_MARKER's distinctive prefix so a human
+# edit that leaves other HTML comments alone still clears the error.
+_DRAFT_MARKER_RE = re.compile(
+    r"<!--\s*DRAFT:\s*edit before relying on this runbook",
+    re.IGNORECASE,
+)
+
 
 def check_hypotheses_only(workspace: Workspace, result: LintResult) -> None:
     if workspace.runbooks_dir is None:
@@ -82,10 +89,32 @@ def check_hypotheses_only(workspace: Workspace, result: LintResult) -> None:
             )
 
 
+def check_draft_runbooks(workspace: Workspace, result: LintResult) -> None:
+    """Reject skeletons left over from ``diag draft --llm`` until edited.
+
+    Draft runbooks are generated as a unit with their scenarios so the
+    bijection holds, but they must not silently count as production corpus.
+    Removing the DRAFT marker (after a human edits the prose) clears this error.
+    """
+    if workspace.runbooks_dir is None:
+        return
+    drafts: list[str] = []
+    for path in sorted(workspace.runbooks_dir.glob("runbook-*.md")):
+        text = path.read_text(encoding="utf-8")
+        if _DRAFT_MARKER_RE.search(text):
+            drafts.append(str(path.relative_to(workspace.root)))
+    if drafts:
+        result.errors.append(
+            "draft runbooks still marked DRAFT (edit and remove the marker): "
+            + ", ".join(drafts)
+        )
+
+
 def lint(workspace: Workspace) -> LintResult:
     """Run every corpus check the workspace has inputs for."""
     result = LintResult()
     check_runbook_scenarios(workspace, result)
     check_blind_eval_grounding(workspace, result)
     check_hypotheses_only(workspace, result)
+    check_draft_runbooks(workspace, result)
     return result

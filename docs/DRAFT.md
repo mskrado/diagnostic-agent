@@ -175,22 +175,64 @@ Two invariants make the commenting safe rather than merely tidy:
 | `--lookback-minutes N` | 60 | Log window for sampling and for verifying selectors |
 | `--dry-run` | off | Report what would be written without writing it |
 | `--json` | off | Print the decision record as JSON |
+| `--llm` | off | Author `prompt_profile.yaml` and DRAFT runbook skeletons |
+| `--llm-prompt-only` | off | With LLM mode, author only the prompt profile |
+| `--llm-runbooks-only` | off | With LLM mode, author only DRAFT runbook skeletons |
 
 A `--bundle` still needs a reachable Prometheus: the bundle supplies the
 proposals, the live stack supplies the verdicts. Without an oracle, drafting
 would be guessing, so `diag draft` exits non-zero rather than write unverified
 files.
 
+## `--llm` — prompt profile and draft runbooks
+
+Opt-in. Requires a configured chat model (`AGENT_CHAT_PROVIDER` /
+`AGENT_CHAT_MODEL`). Without `--llm`, no model is called — Phases 1–2 stay
+usable on air-gapped installs.
+
+```bash
+diag draft -w infrastructure/diagnostic-agent --out ./diag-draft --llm
+diag draft --llm-prompt-only --out ./diag-draft
+diag draft --llm-runbooks-only --out ./diag-draft
+```
+
+### `prompt_profile.yaml`
+
+Authored from [`PROMPT_PROFILE_AUTHORING.md`](PROMPT_PROFILE_AUTHORING.md),
+fed with the scan inventory (services, labels, URLs, alert names). Before the
+file is written, every quoted hostname, port, and `service=` filter is checked
+against that inventory. Remediation verbs that claim execution (`I restarted`,
+`automatically fix`, …) are rejected.
+
+On failure the model is retried once with the failure list. A second failure
+**withholds** the profile: the file is still written (so `extends:` keeps the
+preset), but the prose stays commented out with the reason. An ungrounded
+profile never becomes live configuration.
+
+### DRAFT runbook skeletons
+
+Alerts that the deterministic pass could not pair to a reference runbook get a
+skeleton filled from `_TEMPLATE-runbook.md`, plus a matching `scenarios.yaml`
+entry so the lint bijection holds. Every skeleton opens with:
+
+```html
+<!-- DRAFT: edit before relying on this runbook; remove this marker when ready -->
+```
+
+`diag lint` treats that marker as an error. Edit the prose, remove the marker,
+re-run lint. Until then the backlog stays measurable: "N DRAFT runbooks still
+need a human".
+
+Ungrounded skeleton prose (invented `service=` filters, claimed execution) is
+discarded in favour of a safe template-only skeleton that still carries the
+DRAFT marker.
+
 ## What it does not do
 
-- **No LLM.** Everything here follows from evidence, which keeps it usable on
-  air-gapped installs.
+- **No LLM unless you ask.** Default `diag draft` stays deterministic.
 - **No `execution_profile.yaml`.** A plausible-looking guess at an executable
   action is actively dangerous, and the sandbox design assumes a human chose
   those actions.
-- **No `prompt_profile.yaml`, no runbook skeletons.** Those need a model and are
-  tracked as later phases of
-  [#119](https://github.com/mskrado/diagnostic-agent/issues/119).
 - **No merge.** A draft is a set of files, not a patch. On a workspace a human
   has already edited, stage the draft and merge what you want.
 
@@ -198,4 +240,5 @@ files.
 
 - [SCAN.md](SCAN.md) — the evidence `diag draft` consumes
 - [WORKSPACE.md](WORKSPACE.md) — what each workspace file is for
+- [PROMPT_PROFILE_AUTHORING.md](PROMPT_PROFILE_AUTHORING.md) — playbook the `--llm` prompt follows
 - [INSTALL.md](INSTALL.md) — `diag install` / `diag init` scaffolding

@@ -107,10 +107,12 @@ class DraftResult:
     copied: tuple[CopiedFile, ...] = ()
     preset: str = ""
     preset_scores: tuple[PresetScore, ...] = ()
-    # Alert names with no runbook in the reference corpus (Phase 3 territory).
+    # Alert names with no runbook even after optional LLM skeletons.
     uncovered_alerts: tuple[str, ...] = ()
     # Reference runbooks about alerts this stack does not have.
     unused_runbooks: tuple[str, ...] = ()
+    # Alerts that received a DRAFT skeleton (lint rejects until edited).
+    draft_runbooks: tuple[str, ...] = ()
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
     def all_candidates(self) -> tuple[Candidate, ...]:
@@ -136,5 +138,6 @@ class DraftResult:
             ],
             "uncovered_alerts": list(self.uncovered_alerts),
             "unused_runbooks": list(self.unused_runbooks),
+            "draft_runbooks": list(self.draft_runbooks),
             "warnings": list(self.warnings),
         }
