@@ -19,6 +19,27 @@ diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle
 diag drift -w client/workspace --json --out drift-report.json
 ```
 
+### One-shot Docker (no host `diag`)
+
+Same helper as
+[INSTALL Option B](INSTALL.md#option-b--one-shot-docker-no-usable-host-python-typical-amazon-linux-2):
+
+```bash
+run_diag() {
+  docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+    bash -c "pip install -q -e . && $*"
+}
+
+run_diag "diag drift -w client/workspace \
+  --prometheus-url http://127.0.0.1:9090 \
+  --loki-url http://127.0.0.1:3100"
+
+run_diag "diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle"
+
+run_diag "diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle \
+  --json --out ./drift-report.json"
+```
+
 ## What it checks
 
 | Drift | Severity | Signal |
