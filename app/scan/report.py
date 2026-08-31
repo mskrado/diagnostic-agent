@@ -221,7 +221,8 @@ def _secrets(evidence: ScanEvidence) -> list[str]:
     out.append("")
     out.append(
         "These are candidates for redaction.yaml. Counts come from raw lines; "
-        "anything held in this bundle is already scrubbed."
+        "anything held in this bundle is already scrubbed. `diag draft` writes "
+        "before→after samples to redaction-review.md (matched spans marked «name»)."
     )
     return out
 
