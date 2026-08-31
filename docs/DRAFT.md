@@ -23,6 +23,31 @@ diag validate -w ./diag-draft && diag lint -w ./diag-draft
 Nothing is written into your workspace unless you pass `--in-place`, and even
 then existing files are left alone unless you add `--force`.
 
+### One-shot Docker (no host `diag`)
+
+Reuse the helper from
+[INSTALL Option B](INSTALL.md#option-b--one-shot-docker-no-usable-host-python-typical-amazon-linux-2):
+
+```bash
+run_diag() {
+  docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+    bash -c "pip install -q -e . && $*"
+}
+
+# Prefer a saved scan bundle (avoids a second live probe)
+run_diag "diag draft -w client/workspace --bundle ./scan-evidence.json --out ./diag-draft"
+run_diag "diag validate -w ./diag-draft && diag lint -w ./diag-draft"
+
+# Or draft without a bundle (pass host URLs under --network host)
+run_diag "diag draft -w client/workspace --out ./diag-draft \
+  --prometheus-url http://127.0.0.1:9090 \
+  --loki-url http://127.0.0.1:3100 \
+  --alertmanager-url http://127.0.0.1:9093"
+```
+
+Diff and merge on the host (`diff -ru client/workspace diag-draft`), then delete
+the staging directory when finished.
+
 ## Why verification changes the problem
 
 Almost every line in a workspace is a testable claim, and the stack itself is a
@@ -194,6 +219,10 @@ usable on air-gapped installs.
 diag draft -w infrastructure/diagnostic-agent --out ./diag-draft --llm
 diag draft --llm-prompt-only --out ./diag-draft
 diag draft --llm-runbooks-only --out ./diag-draft
+
+# One-shot Docker (pass chat provider env into the container as needed)
+run_diag "diag draft -w client/workspace --bundle ./scan-evidence.json \
+  --out ./diag-draft --llm"
 ```
 
 ### `prompt_profile.yaml`

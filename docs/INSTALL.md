@@ -11,7 +11,7 @@ upstream releases, and the ownership split keeps merges conflict-free.
 
 ```bash
 # In your private copy of this repo, on the deployment host
-./scripts/bootstrap-venv.sh && source .venv/bin/activate
+./scripts/bootstrap-venv.sh && source .venv/bin/activate   # or Option B Docker — see §2
 diag init
 cp client/agent/.env.example client/agent/.env    # fill secrets
 ./client/scripts/start.sh
@@ -101,9 +101,26 @@ published image.
 
 ### Option B — one-shot Docker (no usable host Python, typical Amazon Linux 2)
 
-Run the generator in a short-lived container; the bind mount writes `client/`
-onto the host. Nothing keeps running in Docker afterward unless you also choose
-a Docker runtime.
+Amazon Linux 2 often cannot run Option A: current `requirements.lock` pins
+(e.g. `numpy`) ship no compatible manylinux wheels for AL2's glibc, and building
+from source fails on the system GCC. Prefer Docker for **all** `diag` CLI use on
+that class of host — not only `diag init`.
+
+Run commands in a short-lived container; the bind mount writes onto the host.
+Nothing keeps running in Docker afterward unless you also choose a Docker
+runtime. **The container does not install `diag` on the host `PATH`.**
+
+Interactive `diag init` (needs a TTY so prompts work):
+
+```bash
+docker run --rm -it \
+  -v "$PWD:/work" -w /work \
+  --network host \
+  python:3.12-slim \
+  bash -c 'pip install -q -e . && diag init'
+```
+
+Non-interactive:
 
 ```bash
 docker run --rm \
@@ -113,8 +130,29 @@ docker run --rm \
   bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
 ```
 
-`--network host` lets discovery reach Prometheus/Loki on the host's published
-ports. Drop it if you pass URLs via flags and do not need local probes.
+Reusable helper for later steps (`scan` / `draft` / `drift` / `validate`). Use a
+**function**, not a quoted `RUN="docker …"` string (shell quoting breaks the
+`-v` path):
+
+```bash
+run_diag() {
+  docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+    bash -c "pip install -q -e . && $*"
+}
+```
+
+`--network host` lets discovery and scan reach Prometheus/Loki on the host's
+**published** ports (`http://127.0.0.1:9090`, …). Compose service DNS
+(`http://prometheus:9090`) does **not** resolve under host networking — pass
+`--prometheus-url` / `--loki-url` / `--alertmanager-url` with host URLs, or drop
+`--network host` and attach to the stack's Compose network instead.
+
+To avoid reinstalling every time, open a shell once:
+
+```bash
+docker run --rm -it -v "$PWD:/work" -w /work --network host python:3.12-slim bash
+# inside: pip install -q -e .   then run diag …
+```
 
 ### Dependency files
 
@@ -240,6 +278,8 @@ details for both paths:
 
 ### Scan → draft → review
 
+Host venv (`diag` on `PATH`):
+
 ```bash
 # 1) See what Prometheus / Loki / Alertmanager already expose
 diag scan -w client/workspace --out ./scan-evidence.json \
@@ -251,6 +291,36 @@ diag validate -w ./diag-draft && diag lint -w ./diag-draft
 
 # 3) Diff, merge what you want into client/workspace/, then delete the staging dir
 ```
+
+One-shot Docker (Option B / Amazon Linux 2). Define `run_diag` as in
+[§2 Option B](#option-b--one-shot-docker-no-usable-host-python-typical-amazon-linux-2).
+With `--network host`, override Compose DNS names to published host ports:
+
+```bash
+PROM=http://127.0.0.1:9090
+LOKI=http://127.0.0.1:3100
+AM=http://127.0.0.1:9093
+WS=client/workspace
+
+# 1) Scan
+run_diag "diag scan -w $WS --out ./scan-evidence.json \
+  --prometheus-url $PROM --loki-url $LOKI --alertmanager-url $AM"
+
+# 2) Draft + check
+run_diag "diag draft -w $WS --bundle ./scan-evidence.json --out ./diag-draft"
+run_diag "diag validate -w ./diag-draft && diag lint -w ./diag-draft"
+
+# 3) Diff / merge on the host (no Docker), then optional cleanup
+diff -ru "$WS" diag-draft | less
+# copy chosen files into client/workspace/, then:
+run_diag "diag validate -w $WS && diag lint -w $WS"
+```
+
+`diag scan` reads Prometheus/Loki from `AGENT_*` / cwd `.env` / package defaults
+(`http://prometheus:9090`), **not** from `client/agent/.env` and not from
+install discovery. Init stores runtime URLs for the **agent container**; a
+host-network one-shot must pass host overrides (or join the Compose network).
+Details: [SCAN.md](SCAN.md).
 
 | Step | Command | What it does |
 |---|---|---|
@@ -322,11 +392,17 @@ docker run --rm -v "$PWD/client/workspace:/workspace:ro" \
 Workspace vs stack (needs Prometheus/Loki, or a saved scan bundle):
 
 ```bash
-# Live
+# Live (host venv)
 diag drift -w client/workspace
 
 # CI / air-gap — commit or upload a scan bundle, then:
 diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle
+
+# One-shot Docker (same run_diag helper as §2 Option B / §5)
+run_diag "diag drift -w client/workspace \
+  --prometheus-url http://127.0.0.1:9090 \
+  --loki-url http://127.0.0.1:3100"
+run_diag "diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle"
 ```
 
 `diag init` scaffolds an optional drift step in
@@ -1215,16 +1291,24 @@ deployment.
 | Remote agent can’t reach Prom/Loki | `.env` still has laptop `localhost` or wrong Docker network | Use container DNS on shared network, or host-gateway / published ports from the agent host |
 | Standalone `diag serve` ignores workspace | `AGENT_WORKSPACE` unset / wrong cwd | Export `AGENT_WORKSPACE` to the directory that contains `agent.yaml` |
 | Windows console Unicode errors | Old build | Use current release (ASCII status markers) |
+| `bootstrap-venv.sh` fails on `numpy` (sdist / Meson / old GCC) | Amazon Linux 2 (or similar): no matching manylinux wheel for the lock pin | Use [Option B](#option-b--one-shot-docker-no-usable-host-python-typical-amazon-linux-2); do not fight a host venv on AL2 |
+| `diag: command not found` after Docker `diag init` | One-shot container exited; host never got `diag` on `PATH` | Keep using `run_diag` / `docker run … pip install -e . && diag …` |
+| `diag scan` → `Name or service not known` for `prometheus` / `loki` | Compose DNS under `--network host`, or Settings defaults (`http://prometheus:9090`) | Pass `--prometheus-url http://127.0.0.1:9090` (and Loki/AM), or attach to the Compose network |
+| `docker: … invalid characters for a local volume name` with a `RUN=` helper | Quoted `RUN="docker -v \"$PWD:/work\" …"` corrupts the mount path | Use the `run_diag()` **function** from Option B, or invoke `docker run` directly |
 
 ---
 
 ## Quick recipe card
 
 ```bash
-# 0) Get `diag` — host venv OR one-shot Docker
+# 0) Get `diag` — host venv OR one-shot Docker (AL2: use Docker for everything)
 ./scripts/bootstrap-venv.sh && source .venv/bin/activate
-#    or: docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
-#          bash -c 'pip install -q -e . && diag init --accept-defaults --allow-degraded'
+#    or:
+# run_diag() {
+#   docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+#     bash -c "pip install -q -e . && $*"
+# }
+# run_diag 'diag init'   # add -it on docker run for interactive prompts
 
 # 1) Scaffold, then start
 diag init --dry-run
@@ -1233,12 +1317,21 @@ cp client/agent/.env.example client/agent/.env
 ./client/scripts/start.sh
 curl -sf http://127.0.0.1:8001/health
 
-# 2) Fill the workspace from live evidence
+# 2) Fill the workspace from live evidence (host venv)
 diag scan -w client/workspace --out ./scan-evidence.json
 diag draft -w client/workspace --bundle ./scan-evidence.json --out ./diag-draft
 # review ./diag-draft, merge into client/workspace/, then:
 diag validate -w client/workspace && diag lint -w client/workspace
 diag drift -w client/workspace   # or --bundle ./scan-evidence.json --no-oracle
+
+# 2b) Same via Docker (host-published ports under --network host)
+# run_diag "diag scan -w client/workspace --out ./scan-evidence.json \
+#   --prometheus-url http://127.0.0.1:9090 \
+#   --loki-url http://127.0.0.1:3100 \
+#   --alertmanager-url http://127.0.0.1:9093"
+# run_diag "diag draft -w client/workspace --bundle ./scan-evidence.json --out ./diag-draft"
+# run_diag "diag validate -w ./diag-draft && diag lint -w ./diag-draft"
+# run_diag "diag drift -w client/workspace --bundle ./scan-evidence.json --no-oracle"
 
 # 3) Non-interactive / CI
 diag init --non-interactive --yes \

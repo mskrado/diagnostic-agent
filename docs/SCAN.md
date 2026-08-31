@@ -16,11 +16,33 @@ diag scan -w infrastructure/diagnostic-agent \
     --alertmanager-url http://alertmanager:9093
 ```
 
-Prometheus and Loki URLs come from the workspace and the usual environment
-variables (`AGENT_PROMETHEUS_URL`, `AGENT_LOKI_URL`), so a workspace that
-already works needs no URLs on the command line. Alertmanager has no default:
-the agent receives its webhook rather than calling it, so pass
-`--alertmanager-url` when you want that section.
+Prometheus and Loki URLs come from `AGENT_PROMETHEUS_URL` / `AGENT_LOKI_URL`, a
+cwd `.env`, or package defaults (`http://prometheus:9090`,
+`http://loki:3100`) — **not** from `client/agent/.env` and not from install
+discovery. A workspace that already works with those env vars needs no URL
+flags. Alertmanager has no default: the agent receives its webhook rather than
+calling it, so pass `--alertmanager-url` when you want that section.
+
+### One-shot Docker (no host `diag`)
+
+Same pattern as [INSTALL Option B](INSTALL.md#option-b--one-shot-docker-no-usable-host-python-typical-amazon-linux-2).
+With `--network host`, Compose DNS names do not resolve — pass published host
+ports:
+
+```bash
+run_diag() {
+  docker run --rm -v "$PWD:/work" -w /work --network host python:3.12-slim \
+    bash -c "pip install -q -e . && $*"
+}
+
+run_diag "diag scan -w client/workspace --out ./scan-evidence.json \
+  --prometheus-url http://127.0.0.1:9090 \
+  --loki-url http://127.0.0.1:3100 \
+  --alertmanager-url http://127.0.0.1:9093"
+```
+
+Or attach to the stack Compose network and keep `http://prometheus:9090` /
+`http://loki:3100` / `http://alertmanager:9093`.
 
 ## What it reports
 
