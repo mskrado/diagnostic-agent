@@ -32,7 +32,7 @@ Related docs: [WORKSPACE.md](WORKSPACE.md) (workspace file reference) ·
 2. [Get the `diag` CLI](#2-get-the-diag-cli)
 3. [Scaffold your deployment (`diag init`)](#3-scaffold-your-deployment-diag-init)
 4. [Start the agent](#4-start-the-agent)
-5. [Customize your workspace](#5-customize-your-workspace)
+5. [Customize your workspace (scan → draft)](#5-customize-your-workspace)
 6. [Wire your observability stack](#6-wire-your-observability-stack)
 7. [Verify](#7-verify)
 8. [Upgrade](#8-upgrade)
