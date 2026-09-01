@@ -14,7 +14,10 @@ set -euo pipefail
 
 BUMP="${BUMP:-patch}"
 
-LAST_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || echo "")
+# Highest semver vX.Y.Z tag — not git describe, which returns the nearest
+# ancestor on the current branch (wrong after a major bump when patch releases
+# continue on a newer v1.x line).
+LAST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -1)
 
 if [ -z "$LAST_TAG" ]; then
   echo "1.0.0"
