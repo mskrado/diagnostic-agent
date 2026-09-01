@@ -58,17 +58,18 @@ jobs:
           BUMP: ${{ inputs.bump || 'patch' }}
         run: |
           set -euo pipefail
-          PREV_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)
+          semver_tags() { git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname; }
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             CREATE_TAG=false
-            # Previous tag = latest v* before this one (exclude the tag being released).
-            PREV_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0 --exclude "v${VERSION}" 2>/dev/null || echo "$PREV_TAG")
+            # Previous tag = highest semver before the tag being released.
+            PREV_TAG=$(semver_tags | grep -vx "v${VERSION}" | head -1 || true)
           else
             if [ "$GITHUB_REF_NAME" != "main" ]; then
               echo "::error::Releases publish from main only (got '$GITHUB_REF_NAME'). Merge devel -> main first."
               exit 1
             fi
+            PREV_TAG=$(semver_tags | head -1 || true)
             VERSION="$(bash scripts/version-next.sh)"
             CREATE_TAG=true
           fi

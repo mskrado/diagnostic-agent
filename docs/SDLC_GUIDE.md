@@ -220,7 +220,7 @@ When a PR **merges into `devel`**, closes issues referenced with `Closes` / `Fix
 (`patch` / `minor` / `major`) — there is no free-text version input.
 
 A tag push *is* the version. A manual run computes the next semver from the
-latest `v*` tag (`scripts/version-next.sh`), rejects anything that is not
+highest `vX.Y.Z` tag in the repo (`scripts/version-next.sh`), rejects anything that is not
 `MAJOR.MINOR.PATCH`, refuses to run off `main`, and creates the git tag only
 after the publish steps succeed.
 
