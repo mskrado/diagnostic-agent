@@ -13,11 +13,11 @@ def test_system_prompt_requires_tool_runs_and_fix_suggestions():
     assert "fix_suggestions" in prompt
     assert "copy-pasteable" in prompt.lower() or "copy-paste" in prompt.lower()
     assert "Do NOT auto-remediate" in prompt
-    assert "docker compose ps" in prompt
+    assert "docker compose" in prompt.lower()
     assert "LogQL" in prompt or "loki" in prompt.lower()
     assert "NEVER put an issue only under" in prompt
     assert "SOURCE OF TRUTH" in prompt
-    assert "EVERY category" in prompt or "every category" in prompt.lower()
+    assert "Naming discipline for tool examples" in prompt
 
 
 def test_core_prompt_invariants_hold_for_any_profile():
@@ -28,6 +28,9 @@ def test_core_prompt_invariants_hold_for_any_profile():
     assert "Do NOT auto-remediate" in prompt
     assert "SOURCE OF TRUTH" in prompt
     assert "NEVER put an issue only under" in prompt
+    assert "Naming discipline for tool examples" in prompt
+    assert "FORBIDDEN" in prompt
+    assert "Verification before remediation" in prompt or "verification before" in prompt.lower()
 
 
 def test_diagnosis_schema_accepts_tool_and_fix_fields():

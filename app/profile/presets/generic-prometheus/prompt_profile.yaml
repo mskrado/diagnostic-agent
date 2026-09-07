@@ -4,9 +4,15 @@ platform_description: >-
   a generic application stack observed via Prometheus metrics and Loki logs
 
 tool_run_hints: |-
-  Prefer concrete, copy-pasteable commands:
+  Prefer concrete, copy-pasteable commands that match THIS stack's naming:
   - Loki LogQL via curl to http://localhost:3100 (or http://loki:3100 in-network)
   - Prometheus PromQL via curl to http://localhost:9090
-  - docker / docker compose ps, logs, inspect (suggested human steps only)
-  - curl health checks against the affected service
+  - docker / docker compose ps, logs, inspect (suggested human steps only;
+    use real container names for `docker logs`, compose keys for `docker compose`)
+  - curl health checks only against ports known to be published on the host
   Adapt hostnames and label filters to the alert and this stack's service_map.
+  Never invent container names, compose keys, or host ports. Keep three naming
+  planes distinct: alert/Prom/Loki `service=` labels, compose service keys, and
+  docker container names. Prefer verification commands before remediation.
+  If service_map lists `log_services` / `log_selector` for a dependency, use
+  those for LogQL instead of inventing a stream for the dependency itself.
