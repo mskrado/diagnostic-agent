@@ -3,21 +3,59 @@ extends: generic-prometheus
 platform_description: >-
   a Spring Boot modular monolith (`platform-service`) behind an `api-gateway`,
   with backing dependencies: postgres, redis, elasticsearch, s3, openai, smtp,
-  twilio
+  twilio. Observability is Prometheus + Loki on the compose host
+  (localhost:9090 / localhost:3100). JDBC/Hikari and most dependency errors
+  appear in `platform-service` logs — many dependencies have no Loki stream of
+  their own. Prefer verifying container image/health before assuming a named
+  database process is actually running (placeholders/stubs are possible).
 
 tool_run_hints: |-
-  Prefer a Docker Compose DEV topology. Include at least 1–3 examples on EVERY category,
-  and 2–5 at the top level covering the whole incident (not only the primary). Prefer
-  real tool names:
-  - Loki LogQL via curl to http://localhost:3100 (or http://loki:3100 in-network)
-  - Prometheus PromQL via curl to http://localhost:9090
-  - docker / docker compose ps, logs, inspect, restart (only as a *suggested*
-    human step, never as something you performed)
-  - curl health/actuator checks (e.g. platform-service :8080, gateway :8000)
-  - psql / redis-cli only when the failure clearly involves those systems
-  Example shapes (adapt hostnames/filters to the actual alert/category):
-  - curl -sG 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={service="platform-service"} |~ "(?i)postgres|PSQLException"' | head
-  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_pending'
+  Where to run: copy-paste on the compose HOST unless a command uses
+  docker exec / in-network DNS. Prom=http://localhost:9090 Loki=http://localhost:3100.
+
+  Naming planes (never mix):
+  | alert/Prom/Loki service= | compose key | container name (docker logs/inspect) |
+  | platform-service | platform-service | <prefix>-platform (see docker ps) |
+  | api-gateway | api-gateway | <prefix>-api-gateway |
+  | postgres (alert label only) | postgres | <prefix>-postgres |
+  | redis | redis | <prefix>-redis |
+  Replace <prefix> with the real compose project prefix from `docker ps`
+  (e.g. acme). If unknown, prefer `docker compose ps` / `docker ps`
+  over inventing names.
+
+  Hard rules:
+  - Use alert `service=` (and service_map log_services) for LogQL/PromQL filters.
+  - Postgres/redis/elasticsearch errors: query `{service="platform-service"}`,
+    NOT `{service="postgres"}` / `{service="redis"}` unless logs exist there.
+  - `docker logs` / `docker inspect` / `docker exec` → container names only.
+  - `docker compose …` → compose keys only, from the stack's compose directory.
+  - Do not invent host ports. Actuator on platform is often only inside the
+    container network (:8080), not published on the host — use
+    `docker exec <platform-container> wget -qO- http://127.0.0.1:8080/actuator/health`
+    or the gateway published port when that is what operators use.
+  - Never suggest `curl http://localhost:5432/health` (Postgres is not HTTP).
+  - Prefer `docker inspect <db-container> --format '{{.Config.Image}} {{.State.Health.Status}} {{json .Config.Cmd}}'`
+    before `docker logs` when DB connectivity fails — confirm it is a real DB image.
+  - psql/redis-cli only via `docker exec` into the real dependency container
+    (or documented host client); never assume host-local sockets.
+  - Verification before remediation; mark restarts as disruptive.
+
+  Golden commands (adapt <prefix> / paths to this host):
+  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_pending{service="platform-service"}'
+  - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_active{service="platform-service"}'
+  - curl -sG 'http://localhost:3100/loki/api/v1/query_range' --data-urlencode 'query={service="platform-service"} |~ "(?i)postgres|PSQLException|hikari|jdbc"' --data-urlencode 'limit=20'
+  - docker ps --format '{{.Names}} {{.Status}}' | findstr /i "platform postgres redis"   # Windows host
+  - docker ps --format '{{.Names}} {{.Status}}' | grep -Ei 'platform|postgres|redis'     # Linux host
+  - docker inspect <prefix>-postgres --format 'image={{.Config.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+  - docker logs <prefix>-postgres --tail 100
+  - docker logs <prefix>-platform --tail 100
   - docker compose ps postgres platform-service
-  - docker logs postgres --tail 100
+  - docker exec <prefix>-platform wget -qO- http://127.0.0.1:8080/actuator/health
+
+  FORBIDDEN (do not emit):
+  - docker logs postgres
+  - docker logs redis
   - curl -sf http://localhost:8080/actuator/health
+  - curl -sf http://localhost:5432/health
+  - psql -U postgres … on the host socket without docker exec
+  - LogQL {service="postgres"} or {service="redis"} for JDBC/cache errors
