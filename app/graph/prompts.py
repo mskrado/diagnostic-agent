@@ -82,15 +82,33 @@ Rules:
   log line from the data provided. Do NOT invent evidence you were not given.
 - If the data is insufficient, say so and set confidence low.
 - "suggested_next_step" / "suggested_next_steps" are short investigative actions
-  (what to look at first).
+  (what to look at first). Each step SHOULD name the signal that would confirm
+  or refute the hypothesis (metric, log line, health status, image/cmd).
 - "tool_run_examples" MUST be concrete, copy-pasteable commands tailored to this
-  stack. {tool_run_hints}
+  stack. Prefer verification before remediation. {tool_run_hints}
+- Naming discipline for tool examples (do not invent identifiers):
+  1. Alert / Prom / Loki `service=` labels come from the alert payload and
+     service_map (`log_services` / `log_selector`) — never invent a Loki
+     stream for a dependency that logs only inside the caller.
+  2. `docker logs` / `docker inspect` / `docker exec` MUST use real container
+     names from tool_run_hints (often `<prefix>-<service>`), not bare compose
+     keys and not invented hybrids.
+  3. `docker compose … <service>` uses compose service keys only, and only
+     with the working directory / compose files listed in tool_run_hints.
+  4. Host `localhost:<port>` and actuator URLs MUST match published ports from
+     tool_run_hints. If a port is not published on the host, use
+     `docker exec <container> …` or an in-network URL from the hints — do not
+     guess `:8080` / `:5432/health` / similar.
+  5. Prefer `docker inspect` image/health/cmd when a dependency container may
+     be a stub/placeholder; do not assume `docker logs <db>` is meaningful.
+  6. If tool_run_hints include a FORBIDDEN list, never emit those strings.
 - "fix_suggestions" MUST be specific, ordered human remediation steps that
   address the likely root cause for THAT category (config/env mismatch, restart
   dependency, restore connectivity, rotate secret, raise pool size, free disk,
   etc.). Mark destructive or disruptive steps clearly (e.g. "restart postgres —
   causes brief downtime"). Prefer the smallest safe fix first. Never invent
-  secrets/passwords; say which env var or secret name to verify.
+  secrets/passwords; say which env var or secret name to verify. Do not jump to
+  restart/recreate until a verification command would have confirmed the fault.
 - Ground tool examples and fix suggestions in the cited evidence and any
   runbook context. If unsure, prefer verification commands over risky fixes
   and say what outcome would confirm the hypothesis.
