@@ -20,7 +20,7 @@ tool_run_hints: |-
   | postgres (alert label only) | postgres | <prefix>-postgres |
   | redis | redis | <prefix>-redis |
   Replace <prefix> with the real compose project prefix from `docker ps`
-  (e.g. publishi, acme). If unknown, prefer `docker compose ps` / `docker ps`
+  (e.g. acme). If unknown, prefer `docker compose ps` / `docker ps`
   over inventing names.
 
   Hard rules:
