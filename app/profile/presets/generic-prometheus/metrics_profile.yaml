@@ -29,5 +29,44 @@ templates:
   latency_p95: >-
     histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{{service="{service}"}}[{window}])))
   service_up: 'up{{service="{service}"}}'
+  # node_exporter host filesystem (no service label); worst real mount.
+  disk_used_ratio_max: >-
+    max(1 - node_filesystem_avail_bytes{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}}
+    / node_filesystem_size_bytes{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}})
+  disk_avail_bytes_min: >-
+    min(node_filesystem_avail_bytes{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}})
+  disk_size_bytes_max: >-
+    max(node_filesystem_size_bytes{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}})
+  disk_inodes_used_ratio_max: >-
+    max(1 - node_filesystem_files_free{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}}
+    / clamp_min(node_filesystem_files{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}}, 1))
+  disk_avail_predicted_24h_bytes: >-
+    min(predict_linear(node_filesystem_avail_bytes{{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs"}}[6h], 86400))
+  # Docker share of the disk; from scripts/docker-disk-textfile.sh via the
+  # node_exporter textfile collector (absent → dropped from the snapshot).
+  docker_images_bytes: 'max(docker_disk_bytes{{type="images"}})'
+  docker_images_reclaimable_bytes: 'max(docker_disk_reclaimable_bytes{{type="images"}})'
+  docker_images_dangling: 'max(docker_images_dangling)'
+  docker_image_tags_max_per_repo: 'max(docker_image_tags_max_per_repo)'
+  docker_volumes_bytes: 'max(docker_disk_bytes{{type="local_volumes"}})'
+  docker_build_cache_bytes: 'max(docker_disk_bytes{{type="build_cache"}})'
+  docker_container_logs_bytes: 'max(docker_container_logs_bytes)'
 
 dependency_probes: {}
+
+alert_metrics:
+  HostDiskSpaceLow: &host_disk
+    - disk_used_ratio_max
+    - disk_avail_bytes_min
+    - disk_size_bytes_max
+    - disk_inodes_used_ratio_max
+    - disk_avail_predicted_24h_bytes
+    - docker_images_bytes
+    - docker_images_reclaimable_bytes
+    - docker_images_dangling
+    - docker_image_tags_max_per_repo
+    - docker_volumes_bytes
+    - docker_build_cache_bytes
+    - docker_container_logs_bytes
+  HostDiskSpaceCritical: *host_disk
+  HostDiskFillPredicted: *host_disk

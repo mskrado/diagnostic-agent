@@ -25,6 +25,9 @@ class MetricsProfile:
     always_collect: tuple[str, ...] = ("db_pool_pending",)
     # kind -> template name or inline PromQL string
     dependency_probes: dict[str, str] = field(default_factory=dict)
+    # alertname -> template names collected on the alerted service for that
+    # alert only (host alerts carry no service-labelled metrics)
+    alert_metrics: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Preset name this profile extends (informational / merge source)
     extends: str | None = None
 
@@ -55,6 +58,7 @@ class MetricsProfile:
                 "service_metrics",
                 "always_collect",
                 "dependency_probes",
+                "alert_metrics",
             ):
                 continue
             if isinstance(val, str):
@@ -70,6 +74,10 @@ class MetricsProfile:
             service_metrics=_list("service_metrics", cls.service_metrics),
             always_collect=_list("always_collect", cls.always_collect),
             dependency_probes=dict(data.get("dependency_probes") or {}),
+            alert_metrics={
+                str(alert): tuple(names or ())
+                for alert, names in (data.get("alert_metrics") or {}).items()
+            },
             extends=data.get("extends"),
         )
 
