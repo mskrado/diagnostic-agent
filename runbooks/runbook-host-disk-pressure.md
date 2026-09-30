@@ -6,26 +6,62 @@
 - `HostDiskFillPredicted` — `predict_linear(...[6h], 24h) < 0` for 1h
 
 ## Meaning
-The EC2/DEV host volume is exhausting space and/or inodes. Docker cannot create
-runc state files (`docker exec` → `no space left on device`), container JSON
-logs corrupt mid-write, and write-heavy paths (Postgres temp, Loki, email
-spool) fail. Cascades into “silent” MFA email loss and unhealthy containers.
+The host root volume is exhausting space and/or inodes. On a Docker host the
+usual culprit is `/var/lib/docker` (images, container logs, volumes) sharing a
+small root volume (~30G). Docker cannot create runc state files (`docker exec`
+→ `no space left on device`), container JSON logs corrupt mid-write, and
+write-heavy paths (Postgres temp, Loki, email spool) fail.
 
-## First checks
-1. Prometheus: `node_filesystem_avail_bytes` / `node_filesystem_size_bytes` by
-   `mountpoint` (exclude `tmpfs|overlay`).
-2. Inodes: `node_filesystem_files_free / node_filesystem_files` (100% inodes
-   with “free” bytes still blocks creates).
-3. Host: `df -h`, `df -i`, `docker system df`.
-4. Oversized container logs:
-   `find /var/lib/docker/containers -name '*-json.log' -size +50M`.
-5. Loki/ES/Prometheus retention vs disk size; diagnostic-agent `/app/audit`.
+## First checks (HostDiskSpaceLow / HostDiskFillPredicted)
+1. Which mount: `df -h` and `df -i` (inodes 100% blocks creates even with free
+   bytes). PromQL: `node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}`.
+2. Is it Docker: `sudo du -xsh /var/lib/docker /var/log /var/cache /home /opt
+   2>/dev/null | sort -h`. If `/var/lib/docker` dominates, go to the Docker
+   sections below.
+3. `docker system df` — the RECLAIMABLE column says how much prune would free.
 
-## Common causes
-- Unbounded Docker JSON logs without rotation (hundreds of MB per container).
-- Accumulated unused ECR image tags on a small root volume (~30G).
-- Loki/Prometheus/ES data growth beyond host capacity.
-- One-shot tools leaving large images (`ollama`, build caches).
+## Docker image / overlay2 bloat (HostDiskFillPredicted, HostDiskSpaceLow)
+Signature: `/var/lib/docker/overlay2` is most of the disk and `docker system
+df` shows Images with a large RECLAIMABLE share (e.g. 23G, 78% reclaimable).
+Cause: every deploy pulls a new release tag and old tags are never removed;
+failed pulls/builds leave dangling `<none>` layers. Confirm:
+- `docker system df`
+- `docker images --format '{{.Repository}}' | sort | uniq -c | sort -rn`
+  (many tags per app repository = release history)
+- `docker images -f dangling=true`
+- `docker ps --format '{{.Image}}' | sort -u` (tags actually running)
+
+## Docker image cleanup, ranked (hypotheses-only; a human runs these)
+1. Low risk: `docker image prune -f` — dangling layers only.
+2. High impact: keep the running tag plus 2–3 rollback tags per app repo,
+   `docker rmi` the rest deliberately, or `docker image prune -a -f --filter
+   "until=168h"` (removes every image not used by any container — including
+   rollback tags and stopped-stack images; review first).
+3. Secondary: `sudo yum clean all` / `apt-get clean`,
+   `sudo journalctl --vacuum-size=100M`.
+4. Review before `docker volume prune`: named volumes hold databases,
+   dashboards and metrics.
+
+## Do not delete without a decision
+- Images of running containers and the current release tag.
+- Named volumes (postgres, redis, grafana, loki, prometheus, agent audit).
+- Observability stack images, unless that stack is being retired.
+- Current release symlink targets under static/web roots.
+
+## Other common causes
+- Unbounded Docker JSON logs without rotation:
+  `sudo find /var/lib/docker/containers -name '*-json.log' -size +50M`.
+- Loki/Prometheus/Elasticsearch data growth beyond retention vs disk size.
+- journald without `SystemMaxUse`; package caches (`/var/cache/yum`).
+- One-shot tools leaving large images (`ollama`, build cache).
+
+## Prevention
+- Post-deploy prune in the deploy path: keep N=2–3 tags per repo, then
+  `docker image prune -af --filter "until=168h"`.
+- Docker `log-opts` `max-size`/`max-file`; journald `SystemMaxUse=100M`.
+- Export `docker system df` to node_exporter (textfile collector) so the
+  alert carries image/reclaimable bytes.
+- Grow the EBS volume if multi-version JVM images + observability share 30G.
 
 ## Blast radius
 All containers on the host. First symptoms: `docker exec` failures, 503
