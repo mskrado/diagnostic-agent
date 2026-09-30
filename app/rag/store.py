@@ -12,13 +12,15 @@ import os
 
 from ..config import settings
 from ..llm import get_embeddings
+from .pinning import build_alert_index, pinned_docs
 
 logger = logging.getLogger(__name__)
 
 
 class RagStore:
-    def __init__(self, store):
+    def __init__(self, store, alert_index: dict[str, list[str]] | None = None):
         self._store = store
+        self._alert_index = alert_index or {}
 
     @property
     def available(self) -> bool:
@@ -42,19 +44,23 @@ class RagStore:
         *,
         k_per_query: int | None = None,
         max_chunks: int | None = None,
+        alert_type: str | None = None,
     ) -> str:
         """Retrieve for each query and merge unique chunks (mixed-error samples).
 
         Dedupes by page_content so repeated postgres hits do not crowd out
-        redis/jvm runbooks when several families are present.
+        redis/jvm runbooks when several families are present. Runbooks whose
+        header names ``alert_type`` are prepended whole and do not count
+        toward ``max_chunks``.
         """
-        if not self.available or not queries:
+        if not self.available:
             return ""
+        pinned = self.pinned_for(alert_type)
         k = k_per_query if k_per_query is not None else settings.rag_top_k
         cap = max_chunks if max_chunks is not None else settings.rag_max_chunks
         seen: set[str] = set()
         merged: list[str] = []
-        for q in queries:
+        for q in queries or []:
             q = (q or "").strip()
             if not q:
                 continue
@@ -68,10 +74,22 @@ class RagStore:
                 if not content or content in seen:
                     continue
                 seen.add(content)
+                if any(content in p for p in pinned):
+                    continue
                 merged.append(content)
                 if len(merged) >= cap:
-                    return "\n\n---\n\n".join(merged)
-        return "\n\n---\n\n".join(merged)
+                    return "\n\n---\n\n".join(pinned + merged)
+        return "\n\n---\n\n".join(pinned + merged)
+
+    def pinned_for(self, alert_type: str | None) -> list[str]:
+        if not settings.rag_pin_alert_runbooks or not alert_type:
+            return []
+        return pinned_docs(
+            self._alert_index,
+            alert_type,
+            max_docs=settings.rag_pin_max_docs,
+            max_chars=settings.rag_pin_max_chars,
+        )
 
 
 def build_rag_store() -> RagStore:
@@ -105,8 +123,14 @@ def build_rag_store() -> RagStore:
         splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
         chunks = splitter.split_documents(docs)
         store = _chroma_from_chunks(chunks, embeddings, settings.chroma_path)
-        logger.info("RAG store built: %d chunks from %d docs", len(chunks), len(docs))
-        return RagStore(store)
+        alert_index = build_alert_index(d.page_content for d in docs)
+        logger.info(
+            "RAG store built: %d chunks from %d docs; %d alert names indexed",
+            len(chunks),
+            len(docs),
+            len(alert_index),
+        )
+        return RagStore(store, alert_index)
     except Exception as exc:  # noqa: BLE001 - startup must not crash on RAG
         logger.warning("Failed to build RAG store: %s; continuing without RAG", exc)
         return RagStore(None)
