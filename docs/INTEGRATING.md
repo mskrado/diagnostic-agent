@@ -19,7 +19,8 @@
 5. [Standalone process (`diag serve`)](#5-standalone-process-diag-serve)
 6. [Verify](#6-verify)
 7. [Guard the workspace in CI](#7-guard-the-workspace-in-ci)
-8. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
+8. [Host disk and Docker metrics](#8-host-disk-and-docker-metrics)
+9. [Reference: Spring Boot modular monolith](#reference-spring-boot-modular-monolith)
 
 ---
 
@@ -279,6 +280,36 @@ diag drift -w infrastructure/diagnostic-agent \
 
 Client forks from `diag init` already get an optional `DRIFT_BUNDLE` step in
 `client-validate.yml` — see [DRIFT.md](DRIFT.md#client-ci-hook).
+
+## 8. Host disk and Docker metrics
+
+For `HostDiskSpaceLow` / `HostDiskSpaceCritical` / `HostDiskFillPredicted` the
+presets' `alert_metrics` collect node_exporter `disk_*` values and, when
+present, `docker_*` values. Without them the diagnosis sees an empty snapshot
+and cannot tell that Docker images fill the disk.
+
+1. Scrape node_exporter with the textfile collector enabled, e.g.
+   `--collector.textfile.directory=/var/lib/node_exporter/textfile_collector`
+   (containerized: mount that host dir read-only into the exporter).
+2. Install [`scripts/docker-disk-textfile.sh`](../scripts/docker-disk-textfile.sh)
+   on the Docker host and run it as root from cron:
+
+   ```cron
+   */15 * * * * root /opt/diagnostic-agent/scripts/docker-disk-textfile.sh
+   ```
+
+3. Check: `curl -sG http://localhost:9090/api/v1/query --data-urlencode
+   'query=docker_disk_reclaimable_bytes'` returns `type="images"` and friends.
+
+The script writes `docker_disk_bytes` / `docker_disk_reclaimable_bytes` /
+`docker_disk_objects` (by `type`: images, containers, local_volumes,
+build_cache), `docker_images_dangling`, `docker_image_tags_max_per_repo`,
+`docker_container_logs_bytes` and a last-run timestamp. The agent itself never
+needs the Docker socket.
+
+Say so in `prompt_profile.yaml` too: note in `platform_description` that
+`/var/lib/docker` shares the root volume, and add host-disk golden commands
+(see `examples/spring-modular-monolith/prompt_profile.yaml`).
 
 ## Reference: Spring Boot modular monolith
 

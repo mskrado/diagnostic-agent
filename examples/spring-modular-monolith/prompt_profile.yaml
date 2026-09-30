@@ -8,6 +8,9 @@ platform_description: >-
   appear in `platform-service` logs — many dependencies have no Loki stream of
   their own. Prefer verifying container image/health before assuming a named
   database process is actually running (placeholders/stubs are possible).
+  Everything runs as Docker containers on one host whose small root volume
+  also holds `/var/lib/docker`; each deploy pulls a new release image tag, so
+  image history is a prime suspect for host disk alerts.
 
 tool_run_hints: |-
   Where to run: copy-paste on the compose HOST unless a command uses
@@ -39,6 +42,13 @@ tool_run_hints: |-
   - psql/redis-cli only via `docker exec` into the real dependency container
     (or documented host client); never assume host-local sockets.
   - Verification before remediation; mark restarts as disruptive.
+  - Host disk alerts (HostDiskSpaceLow / HostDiskSpaceCritical /
+    HostDiskFillPredicted): cite disk_* and docker_* metric values from the
+    snapshot. If docker_images_reclaimable_bytes is a large share of used
+    space, make Docker image history its own category. Suggest
+    `docker image prune` before `-a`, and keep the running tag plus 2–3
+    rollback tags; never suggest `docker volume prune` or
+    `docker system prune --volumes` without review.
 
   Golden commands (adapt <prefix> / paths to this host):
   - curl -sG 'http://localhost:9090/api/v1/query' --data-urlencode 'query=hikaricp_connections_pending{service="platform-service"}'
@@ -51,6 +61,12 @@ tool_run_hints: |-
   - docker logs <prefix>-platform --tail 100
   - docker compose ps postgres platform-service
   - docker exec <prefix>-platform wget -qO- http://127.0.0.1:8080/actuator/health
+  - df -h / && df -i /
+  - sudo du -xsh /var/lib/docker /var/log /var/cache /home 2>/dev/null | sort -h
+  - docker system df
+  - docker images --format '{{.Repository}}' | sort | uniq -c | sort -rn
+  - docker images -f dangling=true
+  - docker ps --format '{{.Image}}' | sort -u
 
   FORBIDDEN (do not emit):
   - docker logs postgres
@@ -59,3 +75,4 @@ tool_run_hints: |-
   - curl -sf http://localhost:5432/health
   - psql -U postgres … on the host socket without docker exec
   - LogQL {service="postgres"} or {service="redis"} for JDBC/cache errors
+  - docker system prune -a --volumes
