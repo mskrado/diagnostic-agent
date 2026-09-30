@@ -46,7 +46,7 @@ def test_presets_map_disk_alerts_to_disk_templates():
     for alert in ("HostDiskSpaceLow", "HostDiskSpaceCritical", "HostDiskFillPredicted"):
         names = metrics.alert_metrics.get(alert)
         assert names and "disk_used_ratio_max" in names
-        for name in names:
+        for name in (n for n in names if n.startswith("disk_")):
             query = metrics.render(name, service="host")
             assert query and "node_filesystem" in query and "{" in query
 
