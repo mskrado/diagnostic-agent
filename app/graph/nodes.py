@@ -115,9 +115,14 @@ class DiagnosticNodes:
                 snapshot[f"{kind}_probe"] = self.prom.instant(probe_q)
             prom_data[svc] = {k: v for k, v in snapshot.items() if v is not None}
 
-        # Always-collect metrics on the alerted service (e.g. db_pool_pending).
+        # Always-collect metrics on the alerted service (e.g. db_pool_pending),
+        # plus alert-keyed ones (e.g. node_filesystem_* for host disk alerts).
         prom_data.setdefault(service, {})
-        for metric_name in metrics.always_collect:
+        alert_type = state.get("alert_type") or ""
+        for metric_name in (
+            *metrics.always_collect,
+            *metrics.alert_metrics.get(alert_type, ()),
+        ):
             try:
                 query = metrics.render(metric_name, service=service, window=window)
             except Exception:  # noqa: BLE001

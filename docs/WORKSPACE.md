@@ -409,6 +409,7 @@ extends: spring-micrometer
 | `service_metrics` | Which template names make up that suite (error rate, latency, …) |
 | `always_collect` | Templates always run on the alerting service, e.g. `db_pool_pending` |
 | `dependency_probes` | `kind` → template name or inline PromQL, for backing stores that get no service suite |
+| `alert_metrics` | `alertname` → template names run on the alerting service for that alert only. Presets map `HostDiskSpaceLow` / `HostDiskSpaceCritical` / `HostDiskFillPredicted` to node_exporter `disk_*` templates so host alerts carry usage, inodes and the 24h prediction |
 
 Install writes a one-line stub. Prefer copying
 `examples/spring-modular-monolith/metrics_profile.yaml` for Spring hosts.
