@@ -5,6 +5,14 @@ Markdown corpus for RAG (`AGENT_RAG_ENABLED=true`). The agent chunks files at
 the log sample (`AGENT_RAG_TOP_K` chunks each, capped by `AGENT_RAG_MAX_CHUNKS`)
 so mixed incidents can surface postgres + redis + JVM runbooks together.
 
+A runbook whose `**Alert:**` / `**Alerts:**` header names the firing alert in
+backticks (CamelCase, e.g. `` `HostDiskFillPredicted` ``) is included **whole**,
+ahead of similarity hits — so alerts with no log lines still get every check.
+Alerts named by more than `AGENT_RAG_PIN_MAX_DOCS` (default 2) runbooks fall
+back to similarity only; total pinned text is capped by
+`AGENT_RAG_PIN_MAX_CHARS` (default 6000). Disable with
+`AGENT_RAG_PIN_ALERT_RUNBOOKS=false`.
+
 ## This is a reference corpus, not your corpus
 
 These files describe a **generic Spring-style reference stack** (a

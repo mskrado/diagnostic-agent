@@ -198,7 +198,9 @@ class DiagnosticNodes:
             module_hint=state.get("module_hint", "") or "",
             log_lines=logs,
         )
-        context = self.rag.query_many(queries)
+        context = self.rag.query_many(
+            queries, alert_type=state.get("alert_type") or None
+        )
         return {**state, "rag_context": context}
 
     # ---- correlate -----------------------------------------------------

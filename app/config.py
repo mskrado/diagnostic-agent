@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # Per-family retrieval + overall cap for mixed-error log samples.
     rag_top_k: int = 2
     rag_max_chunks: int = 8
+    # Include whole runbooks whose **Alert(s):** header names the firing alert.
+    rag_pin_alert_runbooks: bool = True
+    rag_pin_max_docs: int = 2
+    rag_pin_max_chars: int = 6000
 
     # --- Retrieval tuning ---
     loki_lookback_minutes: int = 15
